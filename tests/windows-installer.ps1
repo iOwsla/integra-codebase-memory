@@ -82,6 +82,7 @@ try {
         Assert (-not (Test-Path -LiteralPath $failedRuntime)) 'Failed runtime was published.'
         Assert (@(Get-ChildItem -LiteralPath $temporary -Filter '.codememory-download-*' -Force).Count -eq 0) 'Temporary download leaked.'
     }
+    $global:LASTEXITCODE = 0
     Write-Output 'Windows installer acceptance passed: real project integration, previews, repeats, explicit scope, bootstrap and failure cleanup.'
 } finally {
     Remove-Item -LiteralPath $temporary -Recurse -Force
