@@ -42,6 +42,10 @@ export const schemas = {
       edgeTypes: z.array(z.string().max(40)).max(20).default([]),
     })
     .strict(),
+  find_dead_code_candidates: z.object(paging).strict(),
+  find_duplicate_code: z
+    .object({ ...paging, minBodyLength: z.number().int().min(20).max(100000).default(80) })
+    .strict(),
   search_memory: memorySearchSchema,
 };
 /** Shared application facade. Adapter schemas cannot supply repository IDs. */
@@ -86,6 +90,14 @@ export class CodebaseService {
     return this.store.readIndex(this.context, async (reader, metadata) => {
       let data: Record<string, unknown>;
       switch (name) {
+        case "find_dead_code_candidates":
+          data = await reader.deadCodeCandidates(schemas[name].parse(input));
+          break;
+        case "find_duplicate_code": {
+          const p = schemas[name].parse(input);
+          data = await reader.duplicateCode(p.minBodyLength, p);
+          break;
+        }
         case "search_symbols": {
           const p = schemas[name].parse(input);
           data = await reader.searchSymbols(p.query, p.kinds, p);

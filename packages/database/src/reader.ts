@@ -140,6 +140,99 @@ export class PostgresIndexReader implements IndexReader {
       page,
     );
   }
+  private async qualityMetadata() {
+    const [row] = await this.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM unresolved_references WHERE repository_id=$1",
+    );
+    return {
+      candidateOnly: true,
+      fingerprintRequirement:
+        "Reindex with parser revision 5 or newer before interpreting results. Empty results never certify absence.",
+      unresolvedReferences: Number(row?.count ?? 0),
+      limitations:
+        "Static indexed sources only. Check exports, entry points, callbacks, dynamic uses and excluded consumers. A candidate is not permission to delete or merge code.",
+    };
+  }
+  async deadCodeCandidates(page: PageRequest) {
+    this.checkPage(page);
+    const rows = await this.query<{ symbol: Record<string, unknown> }>(
+      `
+      SELECT jsonb_build_object('id',s.id,'name',s.name,'file',s.data->>'file',
+        'startLine',s.data->'startLine','endLine',s.data->'endLine','kind',s.data->>'kind') AS symbol
+      FROM symbols s JOIN files f ON f.repository_id=s.repository_id AND f.id=s.file_id
+      WHERE s.repository_id=$1 AND s.data->>'kind'='FUNCTION'
+        AND s.data->>'exported'='false' AND s.name NOT LIKE '<%'
+        AND s.data->'metadata'->>'bodyHash' IS NOT NULL
+        AND f.data->>'status'='INDEXED' AND f.data->>'generated'='false'
+        AND NOT EXISTS (SELECT 1 FROM symbol_edges e WHERE e.repository_id=s.repository_id
+          AND e.target_id=s.id AND e.source_id<>s.id AND e.edge_type<>'DECLARES')
+      ORDER BY s.data->>'file' COLLATE "C", (s.data->>'startLine')::int, s.id COLLATE "C"
+      LIMIT $2 OFFSET $3`,
+      [page.limit + 1, page.offset],
+    );
+    return {
+      ...(await this.qualityMetadata()),
+      ...pageResult(
+        rows.map(({ symbol }) => ({
+          symbol,
+          reason: "NO_RECORDED_INCOMING_USAGE",
+          requiredChecks: [
+            "entry points",
+            "exports and external consumers",
+            "callbacks and dynamic registration",
+            "excluded sources",
+          ],
+        })),
+        page,
+      ),
+      scope:
+        "Named, non-exported implemented FUNCTION symbols in non-generated indexed files. Methods and anonymous callbacks excluded. Self-usage ignored; unreachable cycles are not detected.",
+    };
+  }
+  async duplicateCode(minBodyLength: number, page: PageRequest) {
+    this.checkPage(page);
+    if (!Number.isInteger(minBodyLength) || minBodyLength < 20 || minBodyLength > 100000)
+      throw new CodeMemoryError("INVALID_INPUT", "Body length must be 20..100000");
+    const rows = await this.query<{
+      symbol: Record<string, unknown>;
+      bodyHash: string;
+      groupSize: number;
+    }>(
+      `
+      WITH candidates AS (
+        SELECT s.*, count(*) OVER (PARTITION BY s.data->'metadata'->>'bodyHash') AS copies
+        FROM symbols s JOIN files f ON f.repository_id=s.repository_id AND f.id=s.file_id
+        WHERE s.repository_id=$1 AND s.data->'metadata'->>'bodyHash' IS NOT NULL
+          AND (s.data->'metadata'->>'bodyLength')::int >= $2
+          AND f.data->>'status'='INDEXED' AND f.data->>'generated'='false'
+      ) SELECT jsonb_build_object('id',id,'name',name,'file',data->>'file',
+          'startLine',data->'startLine','endLine',data->'endLine','kind',data->>'kind',
+          'bodyStartLine',data->'metadata'->'bodyStartLine','bodyEndLine',data->'metadata'->'bodyEndLine') AS symbol,
+        data->'metadata'->>'bodyHash' AS "bodyHash", copies::int AS "groupSize"
+      FROM candidates WHERE copies>1
+      ORDER BY data->'metadata'->>'bodyHash' COLLATE "C", data->>'file' COLLATE "C",
+        (data->>'startLine')::int, id COLLATE "C" LIMIT $3 OFFSET $4`,
+      [minBodyLength, page.limit + 1, page.offset],
+    );
+    return {
+      ...(await this.qualityMetadata()),
+      ...pageResult(
+        rows.map((row) => ({
+          ...row,
+          reason: "IDENTICAL_BODY_TEXT",
+          requiredChecks: [
+            "parameters and captured values",
+            "side effects and business rules",
+            "callers before extraction",
+          ],
+        })),
+        page,
+      ),
+      minBodyLength,
+      scope:
+        "Exact implemented body text with normalized line endings. Names/signatures are outside the fingerprint; comments, other whitespace, identifiers and literals remain significant. Rows paginate across group members; a group may span pages. Not semantic clone detection.",
+    };
+  }
   async outline(path: string, page: PageRequest) {
     this.checkPage(page);
     const file = await this.query<{ id: string }>(

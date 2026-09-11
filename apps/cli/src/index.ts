@@ -16,7 +16,7 @@ import { Command } from "commander";
 const cli = new Command()
   .name("codememory")
   .description("Local, explicitly project-scoped code intelligence")
-  .version("0.1.0-alpha.11");
+  .version("0.1.0-alpha.12");
 const collect = (value: string, previous: string[]) => [...previous, value];
 const print = (v: unknown) => process.stdout.write(`${JSON.stringify(v, null, 2)}\n`);
 async function open(project?: string) {
@@ -71,6 +71,26 @@ scoped("index [path]", "Index or incrementally reconcile selected source scope")
       await app.store.close();
     }
   });
+for (const [command, tool] of [
+  ["dead-code", "find_dead_code_candidates"],
+  ["duplicates", "find_duplicate_code"],
+] as const)
+  scoped(command, "Report review candidates from the selected completed index")
+    .option("--limit <number>", "Page size", "20")
+    .option("--offset <number>", "Page offset", "0")
+    .action(async (options) => {
+      const app = await open(options.project);
+      try {
+        print(
+          await app.service.execute(tool, {
+            limit: Number(options.limit),
+            offset: Number(options.offset),
+          }),
+        );
+      } finally {
+        await app.store.close();
+      }
+    });
 scoped("status", "Selected project status").action(async (options) => {
   const app = await open(options.project);
   try {

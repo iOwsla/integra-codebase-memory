@@ -219,3 +219,14 @@ existing Codex connection and shared instructions, added the local Claude projec
 connection and ignore block, then reported zero changed files on repetition.
 Both machine-local config files are Git-ignored. This verifies file installation;
 Claude Code's own trust/connection approval is still a client-side check.
+
+## Candidate reports and curl bootstrap (alpha.12)
+
+Disposable-database regressions verify candidate exclusions for exports, alias
+exports, calls and callback references; self-recursion remains a review candidate.
+Duplicate reports are paginated without snapshot reads, isolated across projects
+and updated after source replacement. Parser fixtures cover line endings, literal
+differences, overload implementations and arrows. Bootstrap fixtures cover stdin,
+no-write previews, explicit scope, persistent downloads and failure cleanup.
+The full suite contains 96 tests in 17 files. Hosted release CI must pass before
+the prerelease is published; production acceptance gates remain open.

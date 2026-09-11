@@ -50,6 +50,12 @@ verify missing candidates, excluded files and negative claims against source.
 
 ## DRY and dead code
 
+Use `find_dead_code_candidates` for named non-exported functions without recorded
+incoming usage, and `find_duplicate_code` for exact body-text matches. Reindex with
+this release first. These paginated reports include paths, reasons and required
+checks; duplicate groups can span pages. Neither report proves safe deletion or
+semantic equivalence. Follow up with source, callers, callees and references.
+
 Before adding a helper, search for existing behavior and inspect its callers.
 Compare inputs, outputs, side effects, error handling and business rules. Similar
 names or source text alone do not justify merging implementations. Avoid replacing

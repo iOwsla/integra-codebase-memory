@@ -38,6 +38,8 @@ describe("real Bun CLI and MCP STDIO", () => {
         ["symbol", "add"],
         ["search", "add"],
         ["doctor"],
+        ["dead-code"],
+        ["duplicates"],
       ]) {
         const r = await cli([...cmd, "--project", f.root]);
         expect(r.code, r.err).toBe(0);
@@ -71,6 +73,9 @@ describe("real Bun CLI and MCP STDIO", () => {
       await client.connect(transport);
       expect(client.getInstructions()).toContain("codebase_status");
       const tools = await client.listTools();
+      expect(tools.tools.map((t) => t.name)).toEqual(
+        expect.arrayContaining(["find_dead_code_candidates", "find_duplicate_code"]),
+      );
       expect(tools.tools.some((t) => t.name === "search_symbols")).toBe(true);
       await eventually(async () => {
         const r = await client.callTool({ name: "codebase_status", arguments: {} });

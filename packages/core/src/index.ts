@@ -164,6 +164,8 @@ export interface SymbolSelector {
 }
 /** Scoped, bounded reads from one completed generation. Valid only inside readIndex. */
 export interface IndexReader {
+  deadCodeCandidates(page: PageRequest): Promise<Record<string, unknown>>;
+  duplicateCode(minBodyLength: number, page: PageRequest): Promise<Record<string, unknown>>;
   searchSymbols(
     query: string,
     kinds: string[],

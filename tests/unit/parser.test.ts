@@ -172,3 +172,23 @@ it("optional profiling preserves the complete graph and reports finite stage dur
     expect(phases).toContain(phase);
   expect(phases.filter((p) => p === "SEMANTIC_FILE")).toHaveLength(scan.files.length);
 });
+
+it("fingerprints exact implemented bodies including overloads and arrows", async () => {
+  const f = await fixture({
+    "a.ts":
+      'function one(){\r\nreturn "same literal";\r\n}\nfunction two(){\nreturn "same literal";\n}\nfunction different(){\nreturn "other literal";\n}\nfunction overloaded(x:string):string;\nfunction overloaded(x:number):string;\nfunction overloaded(x:unknown){return "overloaded body"}\nconst arrow=()=>{return "arrow body"};\nclass A { arrow=()=>{return "arrow body"}; }',
+  });
+  try {
+    const context = await createProjectContext(f.root);
+    const scan = await new RepositoryScanner().scan(context);
+    const result = await new TypeScriptPlugin().analyze(context, scan.files, scan.configs);
+    const symbol = (name: string) => result.symbols.find((s) => s.qualifiedName === name)!;
+    expect(symbol("one").metadata.bodyHash).toBeTruthy();
+    expect(symbol("one").metadata.bodyHash).toBe(symbol("two").metadata.bodyHash);
+    expect(symbol("one").metadata.bodyHash).not.toBe(symbol("different").metadata.bodyHash);
+    expect(symbol("overloaded").metadata.bodyHash).toBeTruthy();
+    expect(symbol("arrow").metadata.bodyHash).toBe(symbol("A.arrow").metadata.bodyHash);
+  } finally {
+    await f.dispose();
+  }
+});

@@ -2,7 +2,7 @@
 
 Local code intelligence and explicit project memory for MCP coding agents. Bun + TypeScript Compiler API + PostgreSQL. No telemetry, LLM inference, embeddings or external code uploads.
 
-**Development foundation (`0.1.0-alpha.11`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 12 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
+**Development foundation (`0.1.0-alpha.12`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 14 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
 
 ## Install and run
 
@@ -33,6 +33,19 @@ bun run dev mcp --project /absolute/path/to/repository --auto-index --watch
 For a `codememory` executable, run `bun link` inside `apps/cli`, or invoke the absolute `apps/cli/src/index.ts` path with Bun. Keep the workspace and dependencies installed; the build is a Bun entry point, not a standalone binary.
 
 Only MCP requires an explicit absolute `--project`. CLI indexing accepts a positional path; commands without a path use the current directory and never climb to a Git root. No command automatically scans other registered projects.
+
+## Install with curl
+
+With Bun and Git installed, run from any directory:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.12/bootstrap.sh | sh -s -- --project /absolute/target-project --client both --write
+```
+
+Choose `codex`, `claude` or `both`. Omit `--write` for a no-write preview.
+This downloads a pinned source release and installs its dependencies in your user
+runtime directory. PostgreSQL setup/migrations remain explicit prerequisites;
+see [curl setup, repeat installs and upgrades](docs/setup/installer.md#curl-bootstrap).
 
 ## Project-only installer
 
@@ -99,3 +112,10 @@ Tests create and remove uniquely named databases. `TEST_DATABASE_URL` selects th
 For automatic Codex startup, use `bun run connect:codex /absolute/project --write`.
 See [MCP setup](docs/mcp.md) for prerequisites and verification, and
 [stable release acceptance](docs/release-readiness.md) for remaining product gates.
+
+## Code quality candidates
+
+Use `find_dead_code_candidates` and `find_duplicate_code` through MCP, or run
+`bun run dev dead-code --project /absolute/project` and
+`bun run dev duplicates --project /absolute/project` after indexing. See
+[report scope and limitations](docs/quality-reports.md).

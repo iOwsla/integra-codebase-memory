@@ -88,3 +88,34 @@ The previous `connect:codex` command remains available as a config-only preview/
 writer. Use this installer when you also want instruction blocks and merging with
 other server settings. See the [Codex](codex.md) and [Claude Code](claude-code.md)
 guides for client verification and manual configuration alternatives.
+
+## Curl bootstrap
+
+Install Bun 1.3.3+ and Git first. The bootstrap downloads the pinned release and
+runs `bun install --frozen-lockfile --ignore-scripts`. It does not start PostgreSQL,
+run migrations or index any repository. Follow [database setup](common.md) before
+opening the configured client.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.12/bootstrap.sh | sh -s -- --project /absolute/target-project --client both --write
+```
+
+For inspection before execution, download with `curl -fLo bootstrap.sh` using the
+same URL, review the file, then run `sh bootstrap.sh` with the same arguments.
+Omit `--write` to preview without downloading or creating files.
+
+Default runtime: `$XDG_DATA_HOME/integra-code-memory/releases/v0.1.0-alpha.12`,
+or `$HOME/.local/share/integra-code-memory/releases/v0.1.0-alpha.12`. Override with
+`--install-dir /absolute/runtime`. Keep this directory: client configuration points
+to it. Repeating the command reuses a clean checkout with the expected origin and
+tag; it refuses other existing directories and modified checkouts. Downloads use
+a temporary directory, removed on failure. If project configuration conflicts,
+the downloaded runtime remains available while project changes are rejected by
+the project installer.
+
+Upgrades are explicit: install the next pinned release into its own directory.
+Existing connection entries pointing to another runtime are preserved and rejected
+as conflicts. Remove only the `integra_code_memory` entry from the selected
+project's connection files after reviewing it, then rerun the new installer. Other
+servers and project instructions should remain in place. Automated connection
+migration, native binary distribution and Windows bootstrap are not provided.

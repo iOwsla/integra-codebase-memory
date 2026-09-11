@@ -9,6 +9,7 @@ import type {
 } from "@codememory/core";
 import { hash, id } from "@codememory/shared";
 import ts from "typescript";
+import { bodyFingerprint } from "./quality";
 import { CompilerWorkspace, configurationReferences } from "./workspace";
 
 export interface ParserProfileEvent {
@@ -31,7 +32,7 @@ export interface ParserProfileEvent {
 /** Compiler input is an in-memory allowlist produced by the bounded scanner. */
 export class TypeScriptPlugin implements LanguagePlugin {
   readonly id = "typescript";
-  readonly version = `4:${ts.version}`;
+  readonly version = `5:${ts.version}`;
   readonly configurationReferences = configurationReferences;
   readonly extensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
   constructor(
@@ -140,6 +141,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
             : "public",
         contentHash: hash(text),
         metadata: {
+          ...bodyFingerprint(node),
           parentId: parent?.id,
           tsconfig: parent?.metadata.tsconfig,
           ...(ts.isGetAccessor(node)
@@ -154,6 +156,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
         existing.endLine = Math.max(existing.endLine, sym.endLine);
         existing.endColumn = sym.endColumn;
         existing.contentHash = hash(existing.contentHash + sym.contentHash);
+        if (sym.metadata.bodyHash) Object.assign(existing.metadata, bodyFingerprint(node));
         setDeclaration(node, existing);
         owners.set(node, existing);
         return existing;

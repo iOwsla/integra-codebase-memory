@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.12 — 2026-09-11
+
+- Add project-scoped dead-code candidates and exact-body duplicate reports with bounded pagination, source locations and explicit review requirements.
+- Reindex TypeScript bodies with parser revision 5; expose reports through MCP and CLI.
+- Add a pinned, stdin-safe curl bootstrap for explicit Codex/Claude project integration, dependency installation and no-write previews.
+- Document prerequisites, repeat installation, configuration conflicts and explicit upgrades in English.
+- Stable release gates for long-duration, large-project and memory acceptance remain open.
+
 ## 0.1.0-alpha.11 — 2026-09-11
 
 ### Added
