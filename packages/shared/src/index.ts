@@ -14,6 +14,7 @@ export const configSchema = z
       .min(1024)
       .max(16 * 1024 * 1024)
       .default(2097152),
+    parserTimeoutMs: z.number().int().min(1000).max(600000).default(120000),
     include: z.array(z.string().max(500)).max(100).default([]),
     exclude: z.array(z.string().max(500)).max(100).default([]),
     excludeGenerated: z.boolean().default(false),

@@ -130,3 +130,23 @@ it("property-access references distinguish getter reads from setter writes", asy
       ),
     ).toBe(true);
 });
+it("regression-005: calls belong to execution scopes, including local initializers", async () => {
+  const c = await createProjectContext(
+    resolve("tests/fixtures/typescript/regression-005-call-owners"),
+  );
+  const scan = await new RepositoryScanner().scan(c);
+  const a = await new TypeScriptPlugin().analyze(c, scan.files, scan.configs);
+  const target = a.symbols.find((s) => s.name === "target")!;
+  const byId = new Map(a.symbols.map((s) => [s.id, s]));
+  const callers = a.edges.filter((e) => e.type === "CALLS" && e.target === target.id);
+  const ownerAt = (line: number) => byId.get(callers.find((e) => e.line === line)!.source)!;
+  expect(ownerAt(2).kind).toBe("FILE");
+  for (const line of [4, 5]) expect(ownerAt(line).name).toBe("enclosing");
+  expect(ownerAt(6).name).toBe("nested");
+  for (const line of [9, 13]) expect(ownerAt(line).name).toBe("Local");
+  expect(ownerAt(10).name).toBe("arrow");
+  expect(ownerAt(11).kind).toBe("CONSTRUCTOR");
+  expect(ownerAt(12).name).toBe("method");
+  const unresolved = a.unresolved.find((u) => u.expression === "externalCall()")!;
+  expect(byId.get(unresolved.source)?.name).toBe("enclosing");
+});

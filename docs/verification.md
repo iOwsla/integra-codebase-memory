@@ -102,3 +102,34 @@ that full graph snapshots are no longer read, not a specific latency improvement
 The real CodeMemory repository also upgraded through migration 4 and indexed
 57 files at generation 62; doctor reported COMPLETE/SUCCEEDED, no interrupted
 owner and no source read errors.
+
+
+## Parser ownership and offline acceptance (alpha.6)
+
+- Local suite: 76 tests across 12 files passed, including execution-scope caller
+  ownership, each isolated worker failure mode and validated custom deadlines.
+  Lint, type checking and the CLI build passed.
+- The standalone offline command passed on regression 005: one file, 19 symbols,
+  43 edges, no duplicate IDs, dangling edges or foreign file ownership. Its one
+  unresolved call is intentional.
+- A private real-project POS scope completed offline: 943 sources, 11,566,067
+  bytes, 110,256 symbols and 261,190 edges. Final parser wall time was 64.97 seconds,
+  measured before validation and queries. Duplicate symbol/edge IDs, dangling
+  edges and foreign file ownership were all zero; there were no diagnostics and
+  46,155 unresolved targets under the documented static-analysis limits.
+- The originally observed local-initializer caller defect now resolves to its
+  surrounding function. A repeated scan found no changed/deleted inputs. Private
+  source paths, symbol details and raw probe output are not published here.
+- These offline probes do not verify database indexing, SQL query latency or
+  production throughput. The earlier POS timing included offline queries and
+  validation, so it cannot be compared with this parser-only measurement.
+- Before lazy compiler-program processing, the full private monorepo (4,266
+  sources, 45,588,516 bytes) exceeded both the default 120-second deadline and
+  an explicit 300-second deadline. Increasing the timeout alone was not a fix.
+- After lazy compiler-program processing, the same full monorepo still exceeded
+  the explicit 300-second budget (300.35 seconds including shutdown). The bounded
+  failure path worked; no full graph was returned or published. Phase 9 remains
+  open. These runs are not evidence of a parser throughput improvement.
+- The final POS recheck after lazy processing retained the same graph counts,
+  corrected caller and zero integrity failures. Its 64.97-second parser result
+  is a single observation, not a controlled speedup or peak-memory claim.

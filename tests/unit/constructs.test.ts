@@ -49,7 +49,7 @@ describe("v0.1 TypeScript construct coverage", () => {
     expect(
       a.edges.some(
         (e) =>
-          e.source === named("chained")?.id &&
+          e.source === a.symbols.find((s) => s.kind === "FILE" && s.file === "main.ts")?.id &&
           e.target === named("Concrete.run")?.id &&
           e.type === "CALLS",
       ),

@@ -10,6 +10,12 @@ export class ProcessTypeScriptPlugin extends TypeScriptPlugin {
     files: IndexedFile[],
     configs: Map<string, string>,
   ): Promise<Analysis> {
+    const timeoutMs = context.effectiveConfig?.parserTimeoutMs ?? 120000;
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 600000)
+      throw new CodeMemoryError(
+        "PARSER_ERROR",
+        "Parser timeout must be between 1000 and 600000 ms",
+      );
     return new Promise((resolve, reject) => {
       const child = spawn(
         process.execPath,
@@ -19,34 +25,40 @@ export class ProcessTypeScriptPlugin extends TypeScriptPlugin {
       const output: Buffer[] = [];
       let bytes = 0;
       let failed = false;
-      const fail = () => {
+      const fail = (reason: string) => {
         if (failed) return;
         failed = true;
-        child.kill();
-        reject(
-          new CodeMemoryError("PARSER_ERROR", "Parser worker failed or exceeded output limit"),
-        );
+        clearTimeout(timer);
+        output.length = 0;
+        // A failed isolated parser has no state to flush. Ensure it cannot keep
+        // consuming resources after the indexing job has already failed.
+        child.kill("SIGKILL");
+        reject(new CodeMemoryError("PARSER_ERROR", reason));
       };
-      const timer = setTimeout(fail, 120000);
-      child.once("error", fail);
-      child.stdin.on("error", fail);
+      const timer = setTimeout(
+        () => fail(`Parser worker timed out after ${timeoutMs} ms`),
+        timeoutMs,
+      );
+      child.once("error", () => fail("Parser worker could not start"));
+      child.stdin.on("error", () => fail("Parser worker input stream failed"));
       child.stderr.resume();
       child.stdout.on("data", (chunk: Buffer) => {
+        if (failed) return;
         bytes += chunk.length;
-        if (bytes > 256 * 1024 * 1024) fail();
+        if (bytes > 256 * 1024 * 1024) fail("Parser worker exceeded the 256 MiB output limit");
         else output.push(chunk);
       });
-      child.once("close", (code) => {
+      child.once("close", (code, signal) => {
         clearTimeout(timer);
         if (failed) return;
         if (code !== 0) {
-          fail();
+          fail(`Parser worker exited unsuccessfully (code ${code}, signal ${signal ?? "none"})`);
           return;
         }
         try {
           resolve(JSON.parse(Buffer.concat(output).toString()) as Analysis);
         } catch {
-          fail();
+          fail("Parser worker returned invalid JSON");
         }
       });
       child.stdin.end(JSON.stringify({ context, files, configs: [...configs] }));

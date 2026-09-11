@@ -14,3 +14,9 @@ This is a runnable development foundation, not yet a production-certified v0.1.0
 - Supported verification scope is local macOS arm64 and hosted Linux. Windows, sustained production load and total peak memory across parser workers remain unverified. Real-repository samples are not production performance guarantees.
 
 Next milestone: phase 9 hardening and broader real-repository acceptance, followed by the stable-release documentation gate.
+
+A 4,266-source private monorepo still exceeds a 300-second offline parser budget
+on the tested local host. A 943-source application scope completed. Configurable
+parser deadlines and lazy compiler programs do not close this acceptance gap.
+Full-monorepo parser profiling and publication/peak-memory acceptance remain
+required before a stable release.

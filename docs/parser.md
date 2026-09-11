@@ -32,3 +32,26 @@ Permanent fixtures and exact assertions cover:
 No external npm or standard-library declaration allowlist is enabled. Package config extends that are neither relative/absolute nor already captured conventional config files, pnpm YAML-only workspace declarations and runtime-generated package layouts may remain unresolved. A source shared by multiple compilation configurations has one deterministic owner; this is not a multi-configuration type-check report. Anonymous/block-local offsets can change identities when code moves. Dynamic dispatch, runtime mutation and implicit accessor invocations are not inferred as call edges.
 
 These boundaries are explicit limitations of static v0.1 analysis, not a claim of exhaustive runtime knowledge. New real-repository defects still require fixture → failing test → fix → full validation.
+
+## Call ownership (parser revision 4)
+
+Calls and unresolved calls use their enclosing execution scope. A call inside a
+local variable or object-value initializer belongs to the surrounding function;
+a top-level initializer belongs to the file. Nested functions, methods and
+constructors become their own callers. Class field initializers and static blocks
+use the class; an arrow field keeps its named property identity as the callable.
+This is lexical ownership, not a simulation of instance initialization or runtime
+dispatch. Declaration containment and ordinary reference ownership are unchanged.
+Regression 005 covers these boundaries. Revision 4 invalidates prior indexes so
+re-indexing repairs existing call edges even when source files have not changed.
+
+The compiler host caches immutable virtual path mappings and keeps module
+resolution caches separate for each owning configuration and program. It still
+reads only scanner-accepted inputs. Configuration membership is indexed once
+instead of repeatedly scanning every config's complete file list.
+
+Declaration collection uses syntax-only source files. Semantic analysis then
+creates compiler programs lazily, one owning configuration at a time. Cross-program
+targets use canonical file/offset identities, and declaration ownership uses weak
+node references. This avoids retaining all compiler programs through both passes;
+it does not bound the size of a single program or the accumulated result graph.

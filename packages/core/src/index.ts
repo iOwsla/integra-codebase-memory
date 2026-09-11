@@ -16,6 +16,7 @@ export type SymbolKind =
 export type Resolution = "AST_CONFIRMED" | "SEMANTIC_CONFIRMED" | "HEURISTIC" | "UNRESOLVED";
 export interface EffectiveConfig {
   readonly maxFileSizeBytes: number;
+  readonly parserTimeoutMs: number;
   readonly exclude: readonly string[];
   readonly include: readonly string[];
   readonly excludeGenerated: boolean;

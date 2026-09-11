@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.0-alpha.6 — 2026-09-11
+
+### Fixed
+- Calls inside local initializers now belong to their enclosing execution scope; unresolved calls follow the same rule. Parser revision 4 forces re-analysis to repair existing edges.
+- Parser worker timeout, output limit, startup, input, exit and invalid-JSON failures are distinguishable; failed workers are forcibly stopped and their buffers/timers released.
+- Compiler configuration membership and virtual paths avoid repeated scans; module resolution caches remain isolated by owning configuration and program.
+- Syntax-only declaration collection and lazy semantic programs avoid retaining every compiler project simultaneously; cross-project targets retain file/offset identity.
+
+### Added
+- `bun run verify:parser /absolute/project` performs offline parser and graph-integrity acceptance without database access or source execution.
+- Validated per-project parser deadlines (`parserTimeoutMs`, 1–600 seconds, default 120); offline probes can override the deadline without editing the selected project.
+- Synthetic call-owner regression coverage and isolated worker lifecycle tests; 76 tests pass locally.
+
+### Known limitations
+- Phase 9 remains open for full-monorepo performance, large graph publication and total worker peak-memory validation. This release does not claim stable-release readiness.
+
 ## 0.1.0-alpha.5 — 2026-09-11
 
 ### Added

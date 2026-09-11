@@ -14,7 +14,7 @@ import { CompilerWorkspace, configurationReferences } from "./workspace";
 /** Compiler input is an in-memory allowlist produced by the bounded scanner. */
 export class TypeScriptPlugin implements LanguagePlugin {
   readonly id = "typescript";
-  readonly version = `3:${ts.version}`;
+  readonly version = `4:${ts.version}`;
   readonly configurationReferences = configurationReferences;
   readonly extensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
   constructor(private readonly observe: (path: string) => void = () => {}) {}
@@ -25,13 +25,14 @@ export class TypeScriptPlugin implements LanguagePlugin {
   ): Promise<Analysis> {
     const result: Analysis = { symbols: [], edges: [], unresolved: [], diagnostics: [] };
     const workspace = new CompilerWorkspace(context, files, configs, result.diagnostics);
-    const inputs = workspace.inputs;
     const symbolIds = new Map<string, CodeSymbol>();
     const declarations = new Map<string, CodeSymbol>();
     const fileSymbols = new Map<string, CodeSymbol>();
     const key = (n: ts.Node) => `${resolve(n.getSourceFile().fileName)}:${n.getStart()}`;
-    const owners = new Map<ts.Node, CodeSymbol>();
-    const programs = workspace.programs();
+    const owners = new WeakMap<ts.Node, CodeSymbol>();
+    // Keep declaration identity by path/offset, not by retaining every compiler
+    // program. Semantic analysis creates one program at a time after the
+    // syntax-only declaration pass has populated cross-project targets.
     const addSymbol = (
       node: ts.Node,
       file: IndexedFile,
@@ -77,7 +78,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
         startColumn: start.character + 1,
         endLine: end.line + 1,
         endColumn: end.character + 1,
-        signature: node.getText().split(/\r?\n/)[0]?.slice(0, 500) ?? "",
+        signature: node.getText().slice(0, 500).split(/\r?\n/, 1)[0] ?? "",
         exported:
           (!!node.parent && ts.isExportAssignment(node.parent)) ||
           !!mods?.some(
@@ -211,43 +212,34 @@ export class TypeScriptPlugin implements LanguagePlugin {
       if (ts.isModuleDeclaration(node)) return { kind: "MODULE", name: node.name.getText() };
       return;
     };
-    for (const { program, roots, config } of programs)
-      for (const path of roots) {
-        const sf = program.getSourceFile(path),
-          file = inputs.get(path);
-        if (!sf || !file) continue;
-        this.observe(path);
-        const root = addSymbol(sf, file, "FILE", file.path);
-        root.metadata.tsconfig = config
-          ? config.slice(context.canonicalRoot.length + 1).replaceAll("\\", "/")
-          : null;
-        fileSymbols.set(path, root);
-        const visit = (node: ts.Node, parent: CodeSymbol) => {
-          const classification = classify(node);
-          const owner = classification
-            ? addSymbol(node, file, classification.kind, classification.name, parent)
-            : parent;
-          if (
-            ts.isVariableDeclaration(node) &&
-            node.initializer &&
-            (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
-          ) {
-            owners.set(node.initializer, owner);
-            declarations.set(key(node.initializer), owner);
-            owner.async = !!ts
-              .getModifiers(node.initializer)
-              ?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
-          }
-          ts.forEachChild(node, (n) => visit(n, owner));
-        };
-        ts.forEachChild(sf, (n) => visit(n, root));
-        for (const d of program.getSyntacticDiagnostics(sf))
-          result.diagnostics.push({
-            file: file.path,
-            message: ts.flattenDiagnosticMessageText(d.messageText, " ").slice(0, 2000),
-          });
-      }
-    for (const { program, roots } of programs) {
+    for (const { sf, path, file, config } of workspace.sources()) {
+      this.observe(path);
+      const root = addSymbol(sf, file, "FILE", file.path);
+      root.metadata.tsconfig = config
+        ? config.slice(context.canonicalRoot.length + 1).replaceAll("\\", "/")
+        : null;
+      fileSymbols.set(path, root);
+      const visit = (node: ts.Node, parent: CodeSymbol) => {
+        const classification = classify(node);
+        const owner = classification
+          ? addSymbol(node, file, classification.kind, classification.name, parent)
+          : parent;
+        if (
+          (ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node)) &&
+          node.initializer &&
+          (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+        ) {
+          owners.set(node.initializer, owner);
+          declarations.set(key(node.initializer), owner);
+          owner.async = !!ts
+            .getModifiers(node.initializer)
+            ?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
+        }
+        ts.forEachChild(node, (n) => visit(n, owner));
+      };
+      ts.forEachChild(sf, (n) => visit(n, root));
+    }
+    for (const { program, roots } of workspace.programs()) {
       const checker = program.getTypeChecker();
       const unshadowed = (node: ts.Identifier) =>
         !checker.getSymbolAtLocation(node)?.declarations?.some((d) => {
@@ -302,6 +294,11 @@ export class TypeScriptPlugin implements LanguagePlugin {
         const sf = program.getSourceFile(path),
           root = fileSymbols.get(path);
         if (!sf || !root) continue;
+        for (const d of program.getSyntacticDiagnostics(sf))
+          result.diagnostics.push({
+            file: root.file,
+            message: ts.flattenDiagnosticMessageText(d.messageText, " ").slice(0, 2000),
+          });
         const unresolved = (node: ts.Node, owner: CodeSymbol, type: string) => {
           const line = sf.getLineAndCharacterOfPosition(node.getStart()).line + 1;
           result.unresolved.push({
@@ -314,8 +311,16 @@ export class TypeScriptPlugin implements LanguagePlugin {
             type,
           });
         };
-        const visit = (node: ts.Node, parent: CodeSymbol) => {
-          const owner = owners.get(node) ?? declarations.get(key(node)) ?? parent;
+        const visit = (node: ts.Node, parent: CodeSymbol, caller: CodeSymbol) => {
+          const owner =
+            (classify(node) || ts.isFunctionLike(node) ? declarations.get(key(node)) : undefined) ??
+            parent;
+          // Declaration containment and execution ownership are different: a local
+          // initializer runs in its surrounding function, not in its variable.
+          const callOwner =
+            ts.isFunctionLike(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node)
+              ? owner
+              : caller;
           const line = sf.getLineAndCharacterOfPosition(node.getStart()).line + 1;
           if (
             ts.isCallExpression(node) &&
@@ -342,8 +347,8 @@ export class TypeScriptPlugin implements LanguagePlugin {
                 ? node.expression.name
                 : node.expression,
             );
-            if (target) addEdge(owner, target, "CALLS", line, "SEMANTIC_CONFIRMED");
-            else unresolved(node, owner, "CALLS");
+            if (target) addEdge(callOwner, target, "CALLS", line, "SEMANTIC_CONFIRMED");
+            else unresolved(node, callOwner, "CALLS");
           }
           if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
             const spec = node.moduleSpecifier;
@@ -398,13 +403,13 @@ export class TypeScriptPlugin implements LanguagePlugin {
             const isDeclaration =
               !ts.isPropertyAccessExpression(node.parent) &&
               (node.parent as ts.NamedDeclaration).name === node;
-            const target = targetOf(node);
-            if (target && !isDeclaration && target.id !== owner.id)
+            const target = isDeclaration ? undefined : targetOf(node);
+            if (target && target.id !== owner.id)
               addEdge(owner, target, "REFERENCES", line, "SEMANTIC_CONFIRMED");
           }
-          ts.forEachChild(node, (n) => visit(n, owner));
+          ts.forEachChild(node, (n) => visit(n, owner, callOwner));
         };
-        ts.forEachChild(sf, (n) => visit(n, root));
+        ts.forEachChild(sf, (n) => visit(n, root, root));
       }
     }
     result.edges = [...new Map(result.edges.map((e) => [e.id, e])).values()];

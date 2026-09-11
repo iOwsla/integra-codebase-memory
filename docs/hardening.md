@@ -67,3 +67,30 @@ no-op behavior, query latency and parent-process RSS at the end. It checks edge
 integrity and removes its temporary database afterward. RSS at the end is not
 peak memory or total parser-worker memory. The command needs CREATEDB permission,
 like the test suite. See verification.md for recorded samples and their limits.
+
+## Offline parser acceptance and worker failures
+
+When database operations are unavailable, run:
+
+```sh
+bun run verify:parser /absolute/project
+```
+
+This scans and analyzes the selected sources without executing project code,
+building it, connecting to PostgreSQL or publishing an index. It reports parser
+wall time separately from scanning and integrity validation, plus duplicate IDs,
+dangling edges and foreign file ownership. Unresolved targets and diagnostics are
+counts, not an exhaustive semantic correctness guarantee. This does not verify SQL
+queries, index publication or incremental reconciliation. The successful JSON report omits source
+contents, paths and symbol names so aggregate results can be reviewed separately.
+
+The parser subprocess defaults to a 120-second deadline and has a 256 MiB output cap.
+Timeout, output-cap, startup, input-stream, unsuccessful-exit and invalid-JSON
+failures now have distinct messages. Failure clears buffered output and the timer
+and sends SIGKILL to the isolated parser, so it cannot outlive the failed attempt.
+Worker stderr is not included in error messages. Unit tests exercise each failure
+and successful completion. Large projects can still exceed these limits; this
+release keeps the default deadline unchanged. The validated `parserTimeoutMs`
+project option allows 1000–600000 ms. For an offline probe, override it without
+writing the selected project: `bun run verify:parser /absolute/project 300000`.
+A longer budget is not a parser speed improvement.

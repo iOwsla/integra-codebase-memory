@@ -47,6 +47,7 @@ export class CompilerWorkspace {
   readonly inputs: Map<string, IndexedFile>;
   private readonly texts: Map<string, string>;
   private readonly mounts = new Map<string, string>();
+  private readonly canonicalPaths = new Map<string, string>();
   private readonly redirects = new Map<string, string>();
   private readonly directories = new Set<string>();
   private readonly parsed = new Map<string, ts.ParsedCommandLine>();
@@ -129,10 +130,16 @@ export class CompilerWorkspace {
     }
   }
   private canonical = (path: string): string => {
-    const normalized = resolve(path);
+    const cached = this.canonicalPaths.get(path);
+    if (cached !== undefined) return cached;
+    let normalized = resolve(path);
     for (const [virtual, actual] of this.mounts) {
-      if (contains(virtual, normalized)) return resolve(actual, relative(virtual, normalized));
+      if (contains(virtual, normalized)) {
+        normalized = resolve(actual, relative(virtual, normalized));
+        break;
+      }
     }
+    this.canonicalPaths.set(path, normalized);
     return normalized;
   };
   private sourcePath = (path: string): string => {
@@ -234,10 +241,15 @@ export class CompilerWorkspace {
     }
   }
   private chooseOwners() {
+    const memberships = new Map<string, string[]>();
+    for (const [name, parsed] of this.parsed)
+      for (const path of parsed.fileNames) {
+        const configs = memberships.get(path) ?? [];
+        configs.push(name);
+        memberships.set(path, configs);
+      }
     for (const path of this.inputs.keys()) {
-      const candidates = [...this.parsed]
-        .filter(([, p]) => p.fileNames.includes(path))
-        .map(([name]) => name);
+      const candidates = memberships.get(path) ?? [];
       candidates.sort(
         (a, b) =>
           dirname(b).length - dirname(a).length ||
@@ -294,7 +306,23 @@ export class CompilerWorkspace {
       noLib: true,
     };
   }
-  programs() {
+  *sources() {
+    for (const [path, file] of this.inputs) {
+      const config = this.owner.get(path) ?? "";
+      yield {
+        path,
+        file,
+        config,
+        sf: ts.createSourceFile(
+          path,
+          file.content,
+          this.options(config).target ?? ts.ScriptTarget.ESNext,
+          true,
+        ),
+      };
+    }
+  }
+  *programs() {
     const groups = new Map<string, string[]>();
     for (const path of this.inputs.keys()) {
       const config = this.owner.get(path) ?? "";
@@ -302,7 +330,7 @@ export class CompilerWorkspace {
       group.push(path);
       groups.set(config, group);
     }
-    return [...groups].map(([config, roots]) => {
+    for (const [config, roots] of groups) {
       const options = this.options(config);
       const host: ts.CompilerHost = {
         getSourceFile: (path, version) => {
@@ -324,17 +352,33 @@ export class CompilerWorkspace {
         getNewLine: () => "\n",
         realpath: this.sourcePath,
       };
+      const resolutions = new Map<
+        string,
+        { options: ts.CompilerOptions; cache: ts.ModuleResolutionCache }
+      >();
       host.resolveModuleNameLiterals = (literals, containingFile, _reference, _options, sf) =>
         literals.map((literal) => {
-          const ownOptions = this.options(
-            this.owner.get(this.sourcePath(containingFile)) ?? config,
-          );
+          const owner = this.owner.get(this.sourcePath(containingFile)) ?? config;
+          let entry = resolutions.get(owner);
+          if (!entry) {
+            const options = this.options(owner);
+            entry = {
+              options,
+              cache: ts.createModuleResolutionCache(
+                this.context.canonicalRoot,
+                host.getCanonicalFileName,
+                options,
+              ),
+            };
+            resolutions.set(owner, entry);
+          }
+          const ownOptions = entry.options;
           const resolution = ts.resolveModuleName(
             literal.text,
             containingFile,
             ownOptions,
             host,
-            undefined,
+            entry.cache,
             undefined,
             ts.getModeForUsageLocation(sf, literal, ownOptions),
           );
@@ -362,7 +406,7 @@ export class CompilerWorkspace {
           }
           return resolution;
         });
-      return { program: ts.createProgram({ rootNames: roots, options, host }), roots, config };
-    });
+      yield { program: ts.createProgram({ rootNames: roots, options, host }), roots, config };
+    }
   }
 }

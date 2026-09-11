@@ -2,7 +2,7 @@
 
 Local code intelligence and explicit project memory for MCP coding agents. Bun + TypeScript Compiler API + PostgreSQL. No telemetry, LLM inference, embeddings or external code uploads.
 
-**Development foundation (`0.1.0-alpha.5`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 12 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
+**Development foundation (`0.1.0-alpha.6`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 12 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
 
 ## Install and run
 
