@@ -18,7 +18,7 @@ function response(value: Record<string, unknown>) {
   return { content: [{ type: "text" as const, text }], structuredContent: value };
 }
 export function createMcpServer(service: CodebaseService) {
-  const server = new McpServer({ name: "codememory", version: "0.1.0-alpha.2" });
+  const server = new McpServer({ name: "codememory", version: "0.1.0-alpha.3" });
   for (const [name, schema] of Object.entries(schemas)) {
     server.registerTool(
       name,

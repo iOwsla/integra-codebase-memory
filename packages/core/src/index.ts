@@ -122,9 +122,57 @@ export interface IndexResult {
   reason: string;
   indexedAt: string | null;
 }
+export interface IndexMetadata {
+  indexVersion: number;
+  indexedAt: string | null;
+  freshness: "LAST_COMPLETED";
+  incomplete: boolean;
+}
+export interface PageRequest {
+  limit: number;
+  offset: number;
+}
+export interface SymbolSelector {
+  symbolId?: string;
+  name?: string;
+}
+/** Scoped, bounded reads from one completed generation. Valid only inside readIndex. */
+export interface IndexReader {
+  searchSymbols(
+    query: string,
+    kinds: string[],
+    page: PageRequest,
+  ): Promise<Record<string, unknown>>;
+  searchCode(query: string, page: PageRequest): Promise<Record<string, unknown>>;
+  symbol(selector: SymbolSelector): Promise<Record<string, unknown>>;
+  relationships(
+    selector: SymbolSelector,
+    direction: "incoming" | "outgoing",
+    type: string,
+    page: PageRequest,
+  ): Promise<Record<string, unknown>>;
+  trace(
+    from: string,
+    direction: "incoming" | "outgoing",
+    maxDepth: number,
+    maxPaths: number,
+    types: string[],
+  ): Promise<Record<string, unknown>>;
+  outline(path: string, page: PageRequest): Promise<Record<string, unknown>>;
+  context(
+    path: string,
+    line: number,
+    before: number,
+    after: number,
+  ): Promise<Record<string, unknown>>;
+}
 export interface ProjectStore {
   register(context: ProjectContext): Promise<void>;
   snapshot(context: ProjectContext): Promise<Snapshot>;
+  readIndex<T>(
+    context: ProjectContext,
+    action: (reader: IndexReader, metadata: IndexMetadata) => Promise<T>,
+  ): Promise<T>;
   locked<T>(context: ProjectContext, action: (store: ProjectStore) => Promise<T>): Promise<T>;
   publish(
     context: ProjectContext,

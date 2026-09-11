@@ -1,4 +1,6 @@
 import type {
+  IndexMetadata,
+  IndexReader,
   IndexResult,
   MemoryEntry,
   ProjectContext,
@@ -8,7 +10,8 @@ import type {
 import { CodeMemoryError } from "@codememory/core";
 import { log, projectName } from "@codememory/shared";
 import pg from "pg";
-import { migration } from "./schema";
+import { PostgresIndexReader } from "./reader";
+import { migrations } from "./schema";
 export const defaultDatabaseUrl =
   "postgresql://codememory:local-development-only@127.0.0.1:55432/codememory";
 export class PostgresStore implements ProjectStore {
@@ -39,10 +42,15 @@ export class PostgresStore implements ProjectStore {
       await c.query(
         "CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
       );
-      const r = await c.query("SELECT version FROM schema_migrations WHERE version=1");
-      if (!r.rowCount) {
-        await c.query(migration);
-        await c.query("INSERT INTO schema_migrations(version) VALUES(1)");
+      for (const [index, sql] of migrations.entries()) {
+        const version = index + 1;
+        const r = await c.query("SELECT version FROM schema_migrations WHERE version=$1", [
+          version,
+        ]);
+        if (!r.rowCount) {
+          await c.query(sql);
+          await c.query("INSERT INTO schema_migrations(version) VALUES($1)", [version]);
+        }
       }
       await c.query("COMMIT");
     } catch (e) {
@@ -106,6 +114,49 @@ export class PostgresStore implements ProjectStore {
       await conn.query("ROLLBACK");
       throw e;
     } finally {
+      if (!this.connection) conn.release();
+    }
+  }
+  async readIndex<T>(
+    c: ProjectContext,
+    action: (reader: IndexReader, metadata: IndexMetadata) => Promise<T>,
+  ): Promise<T> {
+    const conn = this.connection ?? (await this.pool.connect());
+    const reader = new PostgresIndexReader(conn, c.projectScopeId);
+    try {
+      await conn.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      await conn.query("SET LOCAL statement_timeout = '5s'");
+      await conn.query("SET LOCAL pg_trgm.similarity_threshold = 0.3");
+      const repo = (
+        await conn.query(
+          `
+        SELECT version, indexed_at,
+          (EXISTS(SELECT 1 FROM files WHERE repository_id=$1 AND data->>'status'<>'INDEXED')
+           OR COALESCE((SELECT jsonb_array_length(data->'diagnostics')>0 FROM index_runs WHERE repository_id=$1 ORDER BY id DESC LIMIT 1),false)) AS incomplete
+        FROM repositories WHERE id=$1`,
+          [c.projectScopeId],
+        )
+      ).rows[0];
+      if (!repo?.version)
+        throw new CodeMemoryError("INDEX_NOT_READY", "Selected project has no completed index");
+      const result = await action(reader, {
+        indexVersion: repo.version,
+        indexedAt: repo.indexed_at?.toISOString() ?? null,
+        freshness: "LAST_COMPLETED",
+        incomplete: repo.incomplete,
+      });
+      await conn.query("COMMIT");
+      return result;
+    } catch (e) {
+      await conn.query("ROLLBACK");
+      if (e && typeof e === "object" && "code" in e && e.code === "57014")
+        throw new CodeMemoryError(
+          "QUERY_TIMEOUT",
+          "Scoped index query exceeded its execution budget; narrow the query",
+        );
+      throw e;
+    } finally {
+      reader.close();
       if (!this.connection) conn.release();
     }
   }

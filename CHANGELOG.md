@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.0-alpha.3 — 2026-09-11
+
+### Added
+- Phase 5: scoped SQL symbol/code search, paged relationships and outlines, bounded file snippets and graph traversal.
+- Generation-consistent read transactions, query timeouts, stable ordering and seven query/upgrade integration tests (51 tests total).
+- Additive migration 2 for search and directed relationship indexes. Run `bun run db:migrate` when upgrading; index creation can briefly lock busy tables.
+
+### Changed
+- Index queries no longer load full project snapshots. Fuzzy ranking now uses PostgreSQL pg_trgm; scores and fuzzy candidates can differ.
+- File context rejects lines beyond indexed content with `INVALID_RANGE`. See docs/search.md for pagination, timeout and upgrade semantics.
+- Remains an alpha source release; memory filters and broader hardening are still open.
+
 ## 0.1.0-alpha.2 — 2026-09-11
 
 ### Fixed

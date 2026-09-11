@@ -5,8 +5,8 @@ Recorded on 2026-09-11. See the development tracker for release scope.
 - Dependency installation with Bun succeeded; versions are locked in bun.lock.
 - PostgreSQL + pgvector Compose service started healthy.
 - Tests create fresh randomly named databases and apply migrations; test databases are removed afterward.
-- Phase 3 local checks passed: `bun run lint`, `bun run typecheck`, `bun run test` (44 tests across 8 files), and `bun run build`.
-- Test split: 30 unit, 8 PostgreSQL integration, 6 real CLI/MCP E2E.
+- Phase 5 local checks passed: `bun run lint`, `bun run typecheck`, `bun run test` (51 tests across 9 files), and `bun run build`.
+- Test split: 30 unit, 15 PostgreSQL integration, 6 real CLI/MCP E2E.
 - Parser coverage includes workspace exports/conditions, referenced custom configs, declaration output redirects, ignored/outside configuration boundaries, overloads, accessors, CommonJS and shadowed module globals. See `parser.md` for the supported scope and limits.
 - Compiled Bun entry `bun dist/index.js --help` ran successfully.
 - SDK v2 client E2E exercises tool listing, scoped structured symbol search, callers and rejection of repository ID injection.
@@ -34,3 +34,25 @@ The current CodeMemory repository indexed successfully: 35 source files, 15 excl
 The Phase 3 smoke test indexed 52 files with 15 excluded entries using the new parser. An immediately repeated compiled-CLI index returned `UNCHANGED`, zero changed/deleted files and the same generation (25). The earlier 35-file sample above records the initial foundation run.
 
 An idle PostgreSQL backend was deliberately terminated in a regression test. The pool reported the disconnect and successfully opened a replacement connection; the process stayed alive.
+
+## Phase 5 query verification
+
+All indexed application tools were exercised with `store.snapshot` replaced by
+a failing spy; no snapshot read occurred. Integration tests also cover a new
+index published during a read transaction, stable pagination, foreign-project
+IDs, escaped LIKE characters, bounded snippets, 1,100-neighbor traversal,
+cycles in both directions, a five-second blocked-query timeout and recovery,
+and migration 1 → 2 without symbol row rewrites.
+
+A separate synthetic run on 2026-09-11 used 10,000 small TypeScript files:
+initial indexing 5,597 ms, unchanged recheck 2,578 ms, scoped symbol query
+55 ms and process RSS at the end 103 MB (decimal). Command:
+`bun run benchmark 10000`. RSS is not peak memory and this small-file synthetic
+workload does not establish performance on large, complex real repositories.
+The earlier 1,000-file numbers above are historical, not a controlled speedup
+comparison.
+
+The real repository was upgraded to migration 2 and indexed at generation 37
+(54 files, 15 exclusions). Compiled-CLI lexical search returned six `readIndex`
+matches from that generation; a repeated index returned `UNCHANGED` with zero
+changed/deleted files.

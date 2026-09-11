@@ -19,3 +19,17 @@ CREATE TABLE index_runs (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,repo
 CREATE TABLE index_errors (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,repository_id text NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,message text NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE settings (repository_id text NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,key text NOT NULL,value jsonb NOT NULL,PRIMARY KEY(repository_id,key));
 `;
+
+// Additive query indexes; migration 1 remains immutable for existing installations.
+export const migrations = [
+  migration,
+  `
+CREATE INDEX symbols_name_lower ON symbols USING gin(lower(name) gin_trgm_ops);
+CREATE INDEX symbols_qualified_lower ON symbols(repository_id,lower(qualified_name));
+CREATE INDEX files_content_lower ON files USING gin(lower(data->>'content') gin_trgm_ops) WHERE data->>'status'='INDEXED';
+CREATE INDEX files_incomplete ON files(repository_id) WHERE data->>'status'<>'INDEXED';
+CREATE INDEX index_runs_project_latest ON index_runs(repository_id,id DESC);
+CREATE INDEX edges_in_page ON symbol_edges(repository_id,target_id,edge_type,source_id);
+CREATE INDEX edges_out_page ON symbol_edges(repository_id,source_id,edge_type,target_id);
+`,
+];

@@ -1,9 +1,7 @@
 import { relative } from "node:path";
-import { CodeMemoryError, type ProjectContext, type ProjectStore } from "@codememory/core";
-import { relationships, resolveSymbol, trace } from "@codememory/graph";
+import type { ProjectContext, ProjectStore } from "@codememory/core";
 import type { ProjectSession } from "@codememory/indexer";
 import { MemoryService } from "@codememory/memory";
-import { searchCode, searchSymbols } from "@codememory/search";
 import { safePath, slash } from "@codememory/shared";
 import { z } from "zod";
 
@@ -27,7 +25,7 @@ export const schemas = {
   get_file_context: z
     .object({
       path: z.string().max(1000),
-      line: z.number().int().min(1),
+      line: z.number().int().min(1).max(2147483597),
       before: z.number().int().min(0).max(50).default(5),
       after: z.number().int().min(0).max(50).default(10),
     })
@@ -83,97 +81,63 @@ export class CodebaseService {
       const p = schemas.search_memory.parse(input);
       return this.memory.search(p.query, p.limit, p.offset, p.includeInactive);
     }
-    const snapshot = await this.store.snapshot(this.context);
-    if (!snapshot.version)
-      throw new CodeMemoryError("INDEX_NOT_READY", "Selected project has no completed index");
-    const metadata = {
-      indexVersion: snapshot.version,
-      indexedAt: snapshot.indexedAt,
-      freshness: "LAST_COMPLETED",
-      incomplete:
-        snapshot.diagnostics.length > 0 || snapshot.files.some((f) => f.status !== "INDEXED"),
-      pendingChanges: this.session ? (await this.session.status()).pendingChanges : 0,
-    };
-    let data: Record<string, unknown>;
-    switch (name) {
-      case "search_symbols": {
-        const p = schemas[name].parse(input);
-        data = searchSymbols(snapshot, p.query, p.limit, p.offset, p.kinds);
-        break;
-      }
-      case "search_code": {
-        const p = schemas[name].parse(input);
-        data = searchCode(snapshot, p.query, p.limit, p.offset);
-        break;
-      }
-      case "get_symbol": {
-        const p = schemas[name].parse(input),
-          s = resolveSymbol(snapshot, p.symbolId, p.name);
-        const file = snapshot.files.find((f) => f.id === s.fileId);
-        data = {
-          symbol: s,
-          snippet: file?.content
-            .split(/\r?\n/)
-            .slice(s.startLine - 1, Math.min(s.endLine, s.startLine + 15))
-            .join("\n")
-            .slice(0, 4000),
-          incoming: snapshot.edges.filter((e) => e.target === s.id).length,
-          outgoing: snapshot.edges.filter((e) => e.source === s.id).length,
-        };
-        break;
-      }
-      case "find_references":
-      case "find_callers":
-      case "find_callees": {
-        const p = schemas[name].parse(input),
-          s = resolveSymbol(snapshot, p.symbolId, p.name);
-        data = relationships(
-          snapshot,
-          s.id,
-          name === "find_callees" ? "outgoing" : "incoming",
-          name === "find_references" ? "REFERENCES" : "CALLS",
-          p.limit,
-          p.offset,
-        );
-        break;
-      }
-      case "trace_dependencies": {
-        const p = schemas[name].parse(input);
-        data = trace(snapshot, p.fromSymbolId, p.direction, p.maxDepth, p.maxPaths, p.edgeTypes);
-        break;
-      }
-      case "get_file_outline":
-      case "get_file_context": {
-        const p = schemas[name].parse(input);
-        const actual = await safePath(this.context, p.path);
-        const path = slash(relative(this.context.canonicalRoot, actual));
-        const file = snapshot.files.find((f) => f.path === path && f.status === "INDEXED");
-        if (!file) throw new CodeMemoryError("NOT_FOUND", "File not present in selected index");
-        if (name === "get_file_outline") {
-          const paging = schemas.get_file_outline.parse(input);
-          const all = snapshot.symbols.filter((s) => s.fileId === file.id);
-          data = {
-            results: all.slice(paging.offset, paging.offset + paging.limit),
-            hasMore: all.length > paging.offset + paging.limit,
-          };
-        } else {
-          const range = schemas.get_file_context.parse(input);
-          const lines = file.content.split(/\r?\n/);
-          const start = Math.max(0, range.line - 1 - range.before),
-            end = Math.min(lines.length, range.line + range.after);
-          data = {
-            path,
-            startLine: start + 1,
-            endLine: end,
-            content: lines.slice(start, end).join("\n").slice(0, 12000),
-            source: "indexed snapshot",
-          };
-        }
-        break;
-      }
-      default:
-        throw new CodeMemoryError("UNKNOWN_TOOL", "Unknown tool");
+    // Validate before opening a database transaction; resolve filesystem boundaries outside it.
+    const p = schemas[name].parse(input);
+    let path: string | undefined;
+    if ("path" in p) {
+      const actual = await safePath(this.context, p.path);
+      path = slash(relative(this.context.canonicalRoot, actual));
     }
-    return { ...metadata, ...data };
+    const pendingChanges = this.session ? (await this.session.status()).pendingChanges : 0;
+    return this.store.readIndex(this.context, async (reader, metadata) => {
+      let data: Record<string, unknown>;
+      switch (name) {
+        case "search_symbols": {
+          const p = schemas[name].parse(input);
+          data = await reader.searchSymbols(p.query, p.kinds, p);
+          break;
+        }
+        case "search_code": {
+          const p = schemas[name].parse(input);
+          data = await reader.searchCode(p.query, p);
+          break;
+        }
+        case "get_symbol":
+          data = await reader.symbol(schemas[name].parse(input));
+          break;
+        case "find_references":
+        case "find_callers":
+        case "find_callees": {
+          const p = schemas[name].parse(input);
+          data = await reader.relationships(
+            p,
+            name === "find_callees" ? "outgoing" : "incoming",
+            name === "find_references" ? "REFERENCES" : "CALLS",
+            p,
+          );
+          break;
+        }
+        case "trace_dependencies": {
+          const p = schemas[name].parse(input);
+          data = await reader.trace(
+            p.fromSymbolId,
+            p.direction,
+            p.maxDepth,
+            p.maxPaths,
+            p.edgeTypes,
+          );
+          break;
+        }
+        case "get_file_outline":
+          data = await reader.outline(path as string, schemas[name].parse(input));
+          break;
+        case "get_file_context": {
+          const p = schemas[name].parse(input);
+          data = await reader.context(path as string, p.line, p.before, p.after);
+          break;
+        }
+      }
+      return { ...metadata, pendingChanges, ...data };
+    });
   }
 }
