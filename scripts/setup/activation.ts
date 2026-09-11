@@ -101,7 +101,7 @@ export async function activateInstalledRuntime(selected?: Registration) {
     const releases = resolve(managementDirectory(), "../releases");
     for (const root of await managedRuntimeRoots()) {
       const within = relative(releases, root);
-      if (!within || within.startsWith("..") || root === runtimeRoot) continue;
+      if (!within || within.startsWith("..") || root === resolve(runtimeRoot)) continue;
       if (!newerRelease(manifest.version, (await verifiedRuntime(root)).version)) continue;
       for (const [entry, managed] of [
         ["apps/cli/src/index.ts", false],

@@ -103,7 +103,8 @@ export async function managedRuntimeRoots() {
     .filter((d) => d.isDirectory() && !d.name.startsWith("."))
     .map((d) => resolve(releaseDirectory, d.name));
   const active = await activeRuntime().catch(() => null);
-  if (active && !roots.includes(active.root)) roots.push(active.root);
+  if (active && !roots.some((root) => normalize(root) === normalize(resolve(active.root))))
+    roots.push(resolve(active.root));
   const verified: string[] = [];
   for (const root of roots)
     if (

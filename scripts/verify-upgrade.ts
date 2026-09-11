@@ -92,7 +92,7 @@ try {
   const activePath = resolve(state, "cli/active.json");
   await writeFile(
     activePath,
-    JSON.stringify({ format: 1, root: legacy, version: "0.1.0-alpha.16" }),
+    JSON.stringify({ format: 1, root: `${legacy}/`, version: "0.1.0-alpha.16" }),
   );
   const first = await launch(legacyEntry, a),
     second = await launch(legacyEntry, b);

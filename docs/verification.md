@@ -350,3 +350,14 @@ latency or complete large-monorepo coverage.
 Native Windows and macOS CI run the Prisma parser/worker cases as release gates;
 Linux runs the full suite. Runtime factories, dynamic arguments, raw SQL and
 nonstandard client mappings remain limited as described in [Prisma coverage](prisma.md).
+
+## Alpha.20 shared runtime path normalization (2026-09-12)
+
+Alpha.19 passed all native CI and release gates, including Prisma coverage. The
+subsequent real alpha.18-to-alpha.19 upgrade check exposed duplicate runtime
+entries caused by a trailing path separator in the persisted active pointer.
+Activation rolled back instead of switching runtimes; the published tag was not
+rewritten. Alpha.20 normalizes paths before deduplication and adds the trailing
+separator to the native upgrade regression. Local lint/typecheck/build and 16
+affected tests in four files passed. Published-package upgrade acceptance remains
+separate from fixture tests.

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-alpha.20 — 2026-09-12
+
+- Normalize active runtime paths before deduplicating release folders. A trailing separator in the alpha.18 active pointer could otherwise cause duplicate legacy-entry rewrites and roll back the upgrade. Preserve Windows case-insensitive path comparison.
+- Exercise a trailing-separator active pointer in native upgrade acceptance. Includes alpha.19 Prisma schema/usage support; no database migration is required.
+
 ## 0.1.0-alpha.19 — 2026-09-12
 
 - Index in-scope Prisma schemas into located models, fields, enums, named relations and composite foreign-key edges. Preserve mapping and referential-action metadata; report syntax and unresolved schema diagnostics.
