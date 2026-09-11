@@ -33,6 +33,17 @@ try {
         & $installer -Project $single -Client $client -Write | Out-Null
         Assert ((Test-Path -LiteralPath (Join-Path $single '.mcp.json')) -eq ($client -eq 'claude')) 'Incorrect client scope.'
     }
+    $upgradeProject = Join-Path $temporary 'claude'
+    $upgradePath = Join-Path $upgradeProject '.mcp.json'
+    $oldConfigText = Get-Content -LiteralPath $upgradePath -Raw
+    $oldConfig = $oldConfigText | ConvertFrom-Json
+    $oldConfig.mcpServers.integra_code_memory.args[0] = 'C:\PreviousRuntime\apps\cli\src\index.ts'
+    $oldConfigText = $oldConfig | ConvertTo-Json -Depth 20
+    [IO.File]::WriteAllText($upgradePath, $oldConfigText)
+    $upgraded = & $installer -Project $upgradeProject -Client claude -Upgrade -Write | ConvertFrom-Json
+    Assert (Test-Path -LiteralPath (Join-Path $upgraded.backupDirectory '.mcp.json')) 'Upgrade did not save previous configuration.'
+    $newConfig = Get-Content -LiteralPath $upgradePath -Raw | ConvertFrom-Json
+    Assert ($newConfig.mcpServers.integra_code_memory.args[0] -ne 'C:\PreviousRuntime\apps\cli\src\index.ts') 'Upgrade did not retarget the runtime.'
     $managementCli = Join-Path $env:LOCALAPPDATA 'integra-code-memory/cli/bin/codememory.cmd'
     Assert (Test-Path -LiteralPath $managementCli) 'Management CLI was not installed before database setup.'
     $cliProject = Join-Path $temporary 'CLI current directory'
@@ -61,7 +72,7 @@ try {
         [void][IO.Directory]::CreateDirectory($liveProject)
         $liveRuntime = Join-Path $temporary 'downloaded runtime'
         & $downloadedScript -Project $liveProject -Client both -InstallDir $liveRuntime -Write -SkipServices | Out-Null
-        & $downloadedScript -Project $liveProject -Client both -InstallDir $liveRuntime -Write -SkipServices | Out-Null
+        & $downloadedScript -Project $liveProject -Client both -InstallDir $liveRuntime -Write -SkipServices -Upgrade | Out-Null
         $liveConfig = Get-Content -LiteralPath (Join-Path $liveProject '.mcp.json') -Raw | ConvertFrom-Json
         Assert ($liveConfig.mcpServers.integra_code_memory.args[3] -eq $liveProject) 'Published bootstrap selected the wrong project.'
         Write-Output 'Published PowerShell download and repeat installation passed.'

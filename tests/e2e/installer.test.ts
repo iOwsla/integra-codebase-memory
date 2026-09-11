@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { link, mkdir, readdir, readFile, symlink } from "node:fs/promises";
+import { link, mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { fixture } from "@codememory/test-utils";
@@ -250,6 +250,58 @@ it("adds the current directory without expanding to a parent repository", async 
     expect(
       JSON.parse((await exec("bun", [cli, "projects", "list"], { cwd: project, env })).stdout),
     ).toMatchObject([{ enabled: false }]);
+  } finally {
+    await f.dispose();
+  }
+});
+
+it("upgrades recognizable connections with backups while preserving unrelated settings", async () => {
+  const f = await fixture({});
+  const env = {
+    ...process.env,
+    XDG_DATA_HOME: resolve(f.root, "state"),
+    LOCALAPPDATA: resolve(f.root, "state"),
+  };
+  const apply = (...extra: string[]) =>
+    exec("sh", [installer, "--project", f.root, "--client", "both", ...extra], { env });
+  try {
+    await apply("--write");
+    const codexPath = resolve(f.root, ".codex/config.toml"),
+      claudePath = resolve(f.root, ".mcp.json");
+    const oldEntry = resolve(f.root, "old-release/apps/cli/src/index.ts");
+    const originalCodex = await readFile(codexPath, "utf8");
+    const oldCodex = `${originalCodex.replace(
+      JSON.stringify(resolve("apps/cli/src/index.ts")),
+      JSON.stringify(oldEntry),
+    )}\n[mcp_servers.other]\ncommand = "keep-me"\n`;
+    const oldClaude = JSON.parse(await readFile(claudePath, "utf8"));
+    oldClaude.mcpServers.integra_code_memory.args[0] = oldEntry;
+    oldClaude.mcpServers.integra_code_memory.env = { DATABASE_URL: "private-existing-database" };
+    oldClaude.mcpServers.other = { command: "keep-me" };
+    await writeFile(codexPath, oldCodex);
+    await writeFile(claudePath, JSON.stringify(oldClaude));
+    await expect(apply("--write")).rejects.toBeDefined();
+    await expect(apply("--upgrade", "--with-services")).rejects.toMatchObject({
+      stderr: expect.stringContaining("preserve database mode"),
+    });
+    const preview = JSON.parse((await apply("--upgrade")).stdout);
+    expect(preview.applied).toBe(false);
+    expect(await readFile(codexPath, "utf8")).toBe(oldCodex);
+    const upgraded = JSON.parse((await apply("--upgrade", "--write")).stdout);
+    expect(await readFile(resolve(upgraded.backupDirectory, ".codex/config.toml"), "utf8")).toBe(
+      oldCodex,
+    );
+    expect(await readFile(codexPath, "utf8")).toContain('command = "keep-me"');
+    const now = JSON.parse(await readFile(claudePath, "utf8"));
+    expect(now.mcpServers.integra_code_memory.args[0]).toBe(resolve("apps/cli/src/index.ts"));
+    expect(now.mcpServers.integra_code_memory.env).toEqual(
+      oldClaude.mcpServers.integra_code_memory.env,
+    );
+    expect(now.mcpServers.other).toEqual({ command: "keep-me" });
+    expect(JSON.parse((await apply("--upgrade", "--write")).stdout).changedFiles).toEqual([]);
+    now.mcpServers.integra_code_memory.args[3] = resolve(f.root, "different-project");
+    await writeFile(claudePath, JSON.stringify(now));
+    await expect(apply("--upgrade", "--write")).rejects.toBeDefined();
   } finally {
     await f.dispose();
   }

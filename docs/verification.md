@@ -259,3 +259,9 @@ Local acceptance on macOS arm64 / Bun 1.3.3:
 - Update policy tests cover numeric alpha ordering, stable channels, draft exclusion, fixed release links, offline failure and disabled checks. Release-body text is never returned as assistant instructions.
 
 The reported Windows project with 4,316 files / approximately 47 MB source is not available in this workspace. Full indexing of that exact project and clean-machine interactive Docker/WSL installation remain separate acceptance work; transport regression coverage does not establish their completion.
+
+The alpha.15 upgrade follow-up passes 129 local tests across 21 files, lint,
+typecheck and build. Upgrade E2E checks cover backups, no-write preview, retained
+external database environment, unrelated MCP servers, repeated application and
+refusal of database-mode or project-scope changes. Native Windows upgrade checks
+are part of the release workflow rather than inferred from the macOS tests.

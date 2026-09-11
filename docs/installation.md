@@ -19,7 +19,7 @@ codememory updates
 
 `projects add` installs the selected client's project configuration and indexes immediately. Use `--no-index` to defer indexing, or `--external-db` to use your own `DATABASE_URL`. A failed index leaves the registration available for retry. `projects remove --yes` disables future MCP sessions without deleting source files, client settings, database indexes or memories. Close existing sessions first; re-adding the project enables it. The older `remove --project ... --yes` command is a separate destructive database purge.
 
-Registrations are local to the operating-system user and stored outside repositories. Reinstalling the CLI replaces its launcher; existing project connections retain their configured runtime until explicitly updated. The installer continues to reject conflicting existing MCP entries instead of overwriting them.
+Registrations are local to the operating-system user and stored outside repositories. Reinstalling the CLI replaces its launcher; existing project connections retain their configured runtime until explicitly updated. Use the bootstrap upgrade commands in [README](../README.md#update-an-existing-installation) to explicitly retarget a compatible same-project entry with backups. Unrecognized/custom entries and database-mode changes are refused.
 
 ## Update notifications
 

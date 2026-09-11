@@ -6,9 +6,100 @@ Local code intelligence and explicit project memory for MCP coding agents. Bun +
 
 Management commands and reboot recovery: [CLI guide](docs/installation.md). Large project parser settings: [indexing guide](docs/indexing.md).
 
-## Install and run
+## Install into the current project
 
-Requirements: Bun 1.3.3+, Git, Docker with Compose (or PostgreSQL with `vector` and `pg_trgm`).
+Open a terminal **inside the project you want to index**. Install Bun 1.3.3+ and Git first. The bootstrap installs the management CLI before preparing Docker and dedicated PostgreSQL. Docker permissions/first-run prompts and a Windows reboot may require interaction.
+
+### macOS and Linux
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.15/bootstrap.sh | sh -s -- --project "$PWD" --client both --write
+export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/integra-code-memory/cli/bin:$PATH"
+```
+
+### Windows PowerShell 5.1 or 7
+
+```powershell
+$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.15/bootstrap.ps1').Content
+& ([scriptblock]::Create($installer)) -Project (Get-Location).Path -Client both -Write
+$env:Path = "$env:LOCALAPPDATA\integra-code-memory\cli\bin;$env:Path"
+```
+
+Choose `codex`, `claude` or `both`. Omit `--write` / `-Write` to preview. The PATH commands above affect the current terminal; add the printed CLI directory to your shell profile or Windows user PATH for future terminals. The installer also prints the full executable path.
+
+The managed database listens on `127.0.0.1:55433`. For an already prepared external database, add `--skip-services` / `-SkipServices` and retain your `DATABASE_URL`. Do not use an application's production database as the index database.
+
+After a requested Windows reboot, reopen a terminal and resume only the selected registered project:
+
+```sh
+codememory system status
+codememory system setup --project /absolute/project
+```
+
+On Windows use `codememory system setup --project (Get-Location).Path` from the project directory. Open/reload the project's MCP connection in Codex or Claude Code; automatic indexing starts when that connection opens. [Detailed platform setup](docs/setup/installer.md).
+
+## Update an existing installation
+
+**Close this project's running MCP connection before updating.** `codememory updates` only checks releases; it does not install them. Run the following from the project directory to install the pinned release and update only that project's connection. Repeat for each project you choose to upgrade; other project connections retain their existing runtime.
+
+### Windows: upgrade from alpha.13 or an external database
+
+```powershell
+$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.15/bootstrap.ps1').Content
+& ([scriptblock]::Create($installer)) -Project (Get-Location).Path -Client both -Upgrade -SkipServices -Write
+$env:Path = "$env:LOCALAPPDATA\integra-code-memory\cli\bin;$env:Path"
+codememory --version
+```
+
+For an **alpha.14 managed Docker/PostgreSQL installation**, omit `-SkipServices`. Keep the same client choice you originally installed. `-SkipServices` preserves an external database connection; it does not migrate that database.
+
+### macOS and Linux
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.15/bootstrap.sh | sh -s -- --project "$PWD" --client both --upgrade --write
+export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/integra-code-memory/cli/bin:$PATH"
+codememory --version
+```
+
+Add `--skip-services` when upgrading alpha.13 or another external-database installation. An upgrade cannot silently change between managed and external database modes.
+
+`--upgrade` / `-Upgrade` retargets recognizable same-project Bun MCP entries, preserves other MCP servers and custom settings, and backs up changed existing files outside the repository. The result prints `backupDirectory`. Custom commands, modified arguments, different project roots or ambiguous TOML require manual review. Omit the write flag for a preview. Existing runtimes, index data and memories are retained; managed migrations are forward-only.
+
+After success, reopen/reload the MCP connection and ask the assistant to call `codebase_status`. CLI version should be `0.1.0-alpha.15`; allow indexing to finish before expecting `READY`. To roll back connection settings, close the connection, restore its `.codex/config.toml` / `.mcp.json` from the reported backup, and reopen the previous runtime. This does not roll back database migrations.
+
+## Everyday CLI commands
+
+Run from the selected project's directory; adding or indexing it needs no path argument:
+
+```sh
+codememory projects add --client both
+codememory index
+codememory status
+codememory projects list
+codememory projects remove --yes
+codememory updates
+```
+
+Use `projects add --no-index` while the database is not ready. Add `--external-db` to `projects add` when using an external index database. Paths remain optional for add/index/remove; a child directory stays the selected scope and never expands to a parent Git root. Listing projects does not scan or index them.
+
+`projects remove --yes` disables future sessions and retains source, index and memory. Close existing sessions first. The older top-level `remove --yes` command purges database content and is a different operation.
+
+`system start` prepares/starts managed services. `system restart --project /absolute/project` recreates the managed PostgreSQL container, retains its volume and indexes only that registered project. Existing MCP sessions may need reconnecting. See [CLI and recovery details](docs/installation.md).
+
+## Large project parser settings
+
+The parser streams records instead of buffering one giant JSON output. Its default total output limit is 1024 MiB. If more is needed, merge these settings into `.codememory/config.json` and restart the MCP session:
+
+```json
+{
+  "parserTimeoutMs": 600000,
+  "parserOutputLimitMiB": 2048
+}
+```
+
+These settings require alpha.15 or later. They do not eliminate compiler/graph memory requirements. Parser failure details appear in `codebase_status.errorMessage`; [coverage and limits](docs/indexing.md) remain explicit.
+
+## Source checkout / development setup
 
 ```sh
 bun install --frozen-lockfile
@@ -18,61 +109,9 @@ bun run build
 bun run dev --help
 ```
 
-The Compose database listens only on `127.0.0.1:55432`. Its development credentials are defined in `docker-compose.yml`. Override `DATABASE_URL` for your own database. Migrations are explicit and forward-only; starting MCP does not migrate schemas.
+The development Compose database uses `127.0.0.1:55432`, separate from managed installation port 55433. For project integration from this checkout, run `./install.sh --project /absolute/project --client both --write`; add `--with-services` for managed provisioning or `--upgrade` to retarget an existing compatible connection. Windows uses `./install.ps1 -Project C:\Projects\Example -Client both -Write`, with `-WithServices` / `-Upgrade` equivalents.
 
-```sh
-bun run dev init --project /absolute/path/to/repository
-bun run dev index --project /absolute/path/to/repository
-bun run dev symbol completeOrder --project /absolute/path/to/repository
-bun run dev callers completeOrder --project /absolute/path/to/repository
-bun run dev doctor --project /absolute/path/to/repository
-bun run dev remember --project /absolute/path/to/repository \
-  --type DECISION --title 'Business day' --content 'The business day starts at 04:00.'
-bun run dev memories --project /absolute/path/to/repository
-bun run dev mcp --project /absolute/path/to/repository --auto-index --watch
-```
-
-For a `codememory` executable, run `bun link` inside `apps/cli`, or invoke the absolute `apps/cli/src/index.ts` path with Bun. Keep the workspace and dependencies installed; the build is a Bun entry point, not a standalone binary.
-
-Only MCP requires an explicit absolute `--project`. CLI indexing accepts a positional path; commands without a path use the current directory and never climb to a Git root. No command automatically scans other registered projects.
-
-## Install with curl
-
-With Bun and Git installed, run from any directory:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.15/bootstrap.sh | sh -s -- --project /absolute/target-project --client both --write
-```
-
-Choose `codex`, `claude` or `both`. Omit `--write` for a no-write preview.
-This downloads a pinned source release, installs its dependencies, prepares
-Docker and dedicated PostgreSQL, then applies migrations. OS permissions, Docker
-first-run prompts or a Windows restart may be required. Use `--skip-services`
-for an externally prepared index database;
-see [curl setup, repeat installs and upgrades](docs/setup/installer.md#curl-bootstrap).
-
-### Windows PowerShell
-
-```powershell
-& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.15/bootstrap.ps1').Content)) -Project 'C:\Projects\My App' -Client both -Write
-```
-
-Works with Windows PowerShell 5.1 and PowerShell 7. Requires Bun and Git;
-Docker/WSL and PostgreSQL preparation are included; use `-SkipServices` for an
-external index database. See [Windows setup and script review](docs/setup/installer.md#windows-powershell).
-
-## Project-only installer
-
-After installing server dependencies and preparing PostgreSQL:
-
-```sh
-./install.sh --project /absolute/target-project --client both --write
-```
-
-Choose `codex`, `claude` or `both`. Omit `--write` for a preview. This merges
-project-local connections and marked instructions; it never registers a global
-server or indexes other repositories. Indexing starts when the selected client
-opens the project. See [installer behavior and prerequisites](docs/setup/installer.md).
+These are source releases requiring Bun and workspace dependencies, not standalone binaries. Starting MCP never installs software or migrates schemas. Update checks use the fixed public GitHub releases API when status is queried; they upload no project data and can be disabled with `CODEMEMORY_UPDATE_CHECK=0`. The AI is instructed to ask before updating. There is no background update installer.
 
 ## MCP client configuration
 

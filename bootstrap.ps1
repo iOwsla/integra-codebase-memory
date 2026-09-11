@@ -5,6 +5,7 @@ param(
     [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'both')][string]$Client,
     [string]$InstallDir,
     [switch]$Write,
+    [switch]$Upgrade,
     [switch]$SkipServices
 )
 $ErrorActionPreference = 'Stop'
@@ -81,4 +82,4 @@ if (Test-Path -LiteralPath $InstallDir) {
         if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force }
     }
 }
-& (Join-Path $InstallDir 'install.ps1') -Project $Project -Client $Client -Write -WithServices:(!$SkipServices)
+& (Join-Path $InstallDir 'install.ps1') -Project $Project -Client $Client -Write -WithServices:(!$SkipServices) -Upgrade:$Upgrade

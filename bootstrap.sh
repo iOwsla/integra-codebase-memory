@@ -5,6 +5,7 @@ version=v0.1.0-alpha.15
 project=
 client=
 apply=false
+upgrade=
 services=--with-services
 install_dir=${XDG_DATA_HOME:-"$HOME/.local/share"}/integra-code-memory/releases/$version
 fail() { printf '%s\n' "$*" >&2; exit 1; }
@@ -18,9 +19,10 @@ while [ "$#" -gt 0 ]; do
         --install-dir) install_dir=$2 ;;
       esac
       shift 2 ;;
+    --upgrade) upgrade=--upgrade; shift ;;
     --write) apply=true; shift ;;
     --skip-services) services=; shift ;;
-    --help) printf '%s\n' 'Usage: sh bootstrap.sh --project /absolute/project --client codex|claude|both [--install-dir /absolute/runtime] [--write] [--skip-services]'; exit 0 ;;
+    --help) printf '%s\n' 'Usage: sh bootstrap.sh --project /absolute/project --client codex|claude|both [--install-dir /absolute/runtime] [--write] [--upgrade] [--skip-services]'; exit 0 ;;
     *) fail "Unknown argument: $1" ;;
   esac
 done
@@ -48,7 +50,7 @@ if [ -e "$install_dir" ]; then
   [ "$(git -C "$install_dir" describe --tags --exact-match HEAD)" = "$version" ] || fail 'Existing runtime has a different version.'
   [ -z "$(git -C "$install_dir" status --porcelain --untracked-files=normal)" ] || fail 'Existing runtime has local changes.'
   [ -d "$install_dir/node_modules" ] || fail 'Runtime dependencies are missing; use a fresh --install-dir.'
-  exec sh "$install_dir/install.sh" --project "$project" --client "$client" --write ${services:+"$services"}
+  exec sh "$install_dir/install.sh" --project "$project" --client "$client" --write ${services:+"$services"} ${upgrade:+"$upgrade"}
 fi
 parent=$(dirname -- "$install_dir")
 mkdir -p -- "$parent"
@@ -60,4 +62,4 @@ git clone --quiet --depth 1 --branch "$version" -- https://github.com/iOwsla/int
 [ ! -e "$install_dir" ] && [ ! -L "$install_dir" ] || fail 'Runtime destination appeared during download.'
 mv -- "$temporary/runtime" "$install_dir"
 printf 'Runtime installed: %s\n' "$install_dir"
-sh "$install_dir/install.sh" --project "$project" --client "$client" --write ${services:+"$services"}
+sh "$install_dir/install.sh" --project "$project" --client "$client" --write ${services:+"$services"} ${upgrade:+"$upgrade"}

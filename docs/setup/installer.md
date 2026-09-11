@@ -115,12 +115,15 @@ a temporary directory, removed on failure. If project configuration conflicts,
 the downloaded runtime remains available while project changes are rejected by
 the project installer.
 
-Upgrades are explicit: install the next pinned release into its own directory.
-Existing connection entries pointing to another runtime are preserved and rejected
-as conflicts. Remove only the `integra_code_memory` entry from the selected
-project's connection files after reviewing it, then rerun the new installer. Other
-servers and project instructions should remain in place. Automated connection
-migration and native binary distribution are not provided.
+Upgrades are explicit: install the next pinned release into its own directory and
+pass `--upgrade` / `-Upgrade` together with the write flag. Recognizable same-project
+Bun MCP entries are retargeted after backups are saved outside the repository;
+other servers and custom settings are preserved. The output includes
+`backupDirectory`. Database mode is retained: alpha.13 and external-database
+installations need `--skip-services` / `-SkipServices`. Custom commands/arguments,
+ambiguous TOML and different project roots are refused before project writes.
+See [complete upgrade commands and rollback](../../README.md#update-an-existing-installation).
+Native binary distribution and unattended automatic updating are not provided.
 
 ## Windows PowerShell
 

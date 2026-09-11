@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { createProjectContext } from "@codememory/shared";
 import { Command } from "commander";
 import { connectCodex } from "./connect-codex";
 import { runtimeRoot } from "./runtime-root";
 import { installManagementCli, saveRegistration } from "./setup/cli-state";
-import { serviceDirectory } from "./setup/service-state";
+import { checkLocalPath, serviceDirectory } from "./setup/service-state";
 
 const serverRoot = runtimeRoot;
 const name = "integra_code_memory";
@@ -63,6 +63,72 @@ function compatible(actual: unknown, expected: Record<string, unknown>) {
   );
 }
 
+/** Only retarget a recognizable same-project connection; preserve all custom settings. */
+function upgradedEntry(actual: unknown, expected: Record<string, unknown>) {
+  if (!object(actual) || !Array.isArray(actual.args) || !Array.isArray(expected.args))
+    throw new Error("Unrecognized CodeMemory entry; review its configuration manually.");
+  const old = actual.args;
+  const next = expected.args;
+  if (
+    typeof actual.command !== "string" ||
+    !["bun", "bun.exe"].includes(basename(actual.command)) ||
+    typeof old[0] !== "string" ||
+    !isAbsolute(old[0]) ||
+    JSON.stringify(old.slice(1)) !== JSON.stringify(next.slice(1))
+  )
+    throw new Error(
+      "Upgrade requires an existing Bun MCP entry for this exact project with standard arguments.",
+    );
+  const suffix = String(next[0]).endsWith("managed-mcp.ts")
+    ? "scripts/managed-mcp.ts"
+    : "apps/cli/src/index.ts";
+  if (!old[0].replaceAll("\\", "/").endsWith(`/${suffix}`))
+    throw new Error(
+      "Upgrade must preserve database mode. For an external database or alpha.13 installation use --skip-services (-SkipServices in PowerShell); do not silently switch databases.",
+    );
+  if (
+    object(expected.env) &&
+    (!object(actual.env) ||
+      actual.env.CODEMEMORY_SERVICE_DIR !== expected.env.CODEMEMORY_SERVICE_DIR)
+  )
+    throw new Error(
+      "Managed database state directory differs. Review this connection manually to preserve its data.",
+    );
+  return {
+    ...actual,
+    command: expected.command,
+    args: expected.args,
+    ...(expected.cwd ? { cwd: expected.cwd } : {}),
+  };
+}
+function upgradeCodex(text: string, actual: unknown, expected: Record<string, unknown>) {
+  const updated = upgradedEntry(actual, expected);
+  const header = /^\[mcp_servers\.integra_code_memory\][ \t]*(?:#[^\r\n]*)?\r?$/m.exec(text);
+  if (!header)
+    throw new Error(
+      "Upgrade needs a standard [mcp_servers.integra_code_memory] table; review custom TOML manually.",
+    );
+  const startAt = header.index + header[0].length;
+  const remainder = text.slice(startAt);
+  const nextHeader = /^\s*\[/m.exec(remainder);
+  const endAt = nextHeader ? startAt + nextHeader.index : text.length;
+  let body = text.slice(startAt, endAt);
+  for (const field of ["command", "args", "cwd"] as const) {
+    const pattern = new RegExp(`^${field}[ \t]*=[^\r\n]*$`, "gm");
+    const matches = [...body.matchAll(pattern)];
+    if (matches.length !== 1)
+      throw new Error(
+        "Upgrade needs standard single-line command, args and cwd fields; review custom TOML manually.",
+      );
+    body = body.replace(pattern, () => `${field} = ${JSON.stringify(updated[field])}`);
+  }
+  const result = text.slice(0, startAt) + body + text.slice(endAt);
+  const parsed = parseToml(result).mcp_servers as Record<string, unknown>;
+  if (JSON.stringify(parsed[name]) !== JSON.stringify(updated))
+    throw new Error("Upgrade could not preserve the complete Codex entry; nothing was written.");
+  return result;
+}
+
 function parseToml(text: string) {
   try {
     return Bun.TOML.parse(text) as Record<string, unknown>;
@@ -78,7 +144,13 @@ function parseJson(text: string): unknown {
   }
 }
 
-export async function installProject(root: string, client: string, write = false, managed = false) {
+export async function installProject(
+  root: string,
+  client: string,
+  write = false,
+  managed = false,
+  upgrade = false,
+) {
   if (!["codex", "claude", "both"].includes(client))
     throw new Error("Client must be codex, claude or both");
   const context = await createProjectContext(root);
@@ -110,8 +182,17 @@ export async function installProject(root: string, client: string, write = false
       const servers = parsed.mcp_servers;
       if (servers !== undefined && !object(servers)) throw new Error("Invalid mcp_servers table");
       if (object(servers) && Object.hasOwn(servers, name)) {
-        if (!compatible(servers[name], expected as Record<string, unknown>))
-          throw new Error("Existing CodeMemory Codex entry conflicts; nothing was written");
+        if (!compatible(servers[name], expected as Record<string, unknown>)) {
+          if (upgrade)
+            return upgradeCodex(
+              before as string,
+              servers[name],
+              expected as Record<string, unknown>,
+            );
+          throw new Error(
+            "Existing CodeMemory Codex entry conflicts; use --upgrade after reviewing the selected project",
+          );
+        }
         return before as string;
       }
       const result = `${before ?? ""}\n${generated}`;
@@ -133,8 +214,13 @@ export async function installProject(root: string, client: string, write = false
         ...(managed ? { env: { CODEMEMORY_SERVICE_DIR: serviceDirectory() } } : {}),
       };
       if (Object.hasOwn(servers, name)) {
-        if (!compatible(servers[name], expected))
-          throw new Error("Existing CodeMemory Claude entry conflicts; nothing was written");
+        if (!compatible(servers[name], expected)) {
+          if (upgrade)
+            return `${JSON.stringify({ ...parsed, mcpServers: { ...servers, [name]: upgradedEntry(servers[name], expected) } }, null, 2)}\n`;
+          throw new Error(
+            "Existing CodeMemory Claude entry conflicts; use --upgrade after reviewing the selected project",
+          );
+        }
         return before as string;
       }
       return `${JSON.stringify({ ...parsed, mcpServers: { ...servers, [name]: expected } }, null, 2)}\n`;
@@ -158,11 +244,22 @@ export async function installProject(root: string, client: string, write = false
   );
 
   const changed = edits.filter((edit) => edit.before !== edit.after);
+  let backupDirectory: string | undefined;
   if (write) {
     // Validate every planned destination again before applying any changes.
     for (const edit of edits)
       if ((await readTarget(selected, edit.path)).text !== edit.before)
         throw new Error("Files changed during planning; rerun the installer");
+    if (upgrade && changed.some((edit) => edit.before !== null)) {
+      backupDirectory = resolve(serviceDirectory(), "../backups", randomUUID());
+      await checkLocalPath(backupDirectory);
+      for (const edit of changed) {
+        if (edit.before === null) continue;
+        const backup = resolve(backupDirectory, edit.path);
+        await mkdir(dirname(backup), { recursive: true, mode: 0o700 });
+        await writeFile(backup, edit.before, { flag: "wx", mode: 0o600 });
+      }
+    }
     for (const edit of changed) {
       const destination = resolve(selected, edit.path);
       if ((await readTarget(selected, edit.path)).text !== edit.before)
@@ -182,6 +279,8 @@ export async function installProject(root: string, client: string, write = false
     projectRoot: selected,
     client,
     applied: write,
+    upgrade,
+    ...(backupDirectory ? { backupDirectory } : {}),
     changedFiles: changed.map((edit) => edit.path),
     unchangedFiles: edits.filter((edit) => edit.before === edit.after).map((edit) => edit.path),
     next: "Open this project in the selected client, approve/reload its MCP connection if prompted, then call codebase_status. PostgreSQL must be running. Indexing starts when the client opens the connection.",
@@ -192,6 +291,10 @@ if (import.meta.main && process.argv[1]?.endsWith("install-project.ts")) {
     .description("Install CodeMemory only into an explicitly selected project")
     .requiredOption("--project <absolute-path>", "Target project; no parent/root inference")
     .requiredOption("--client <client>", "codex, claude or both")
+    .option(
+      "--upgrade",
+      "Back up and retarget existing same-project CodeMemory connections; preserve database mode",
+    )
     .option("--write", "Apply changes (default: preview paths only)")
     .option(
       "--with-services",
@@ -203,6 +306,7 @@ if (import.meta.main && process.argv[1]?.endsWith("install-project.ts")) {
     client: string;
     write?: boolean;
     withServices?: boolean;
+    upgrade?: boolean;
   }>();
   try {
     // Preflight configuration conflicts and project paths before system changes.
@@ -211,6 +315,7 @@ if (import.meta.main && process.argv[1]?.endsWith("install-project.ts")) {
       options.client,
       false,
       options.withServices,
+      options.upgrade,
     );
     if (options.write) {
       await installManagementCli();
@@ -228,7 +333,13 @@ if (import.meta.main && process.argv[1]?.endsWith("install-project.ts")) {
     console.log(
       JSON.stringify(
         options.write
-          ? await installProject(options.project, options.client, true, options.withServices)
+          ? await installProject(
+              options.project,
+              options.client,
+              true,
+              options.withServices,
+              options.upgrade,
+            )
           : { ...preview, servicesPlanned: !!options.withServices },
         null,
         2,

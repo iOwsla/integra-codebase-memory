@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Project,
     [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'both')][string]$Client,
     [switch]$Write,
+    [switch]$Upgrade,
     [switch]$WithServices
 )
 $ErrorActionPreference = 'Stop'
@@ -14,6 +15,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'node_modules') -PathT
     throw 'Install server dependencies first: bun install --frozen-lockfile'
 }
 $arguments = @((Join-Path $PSScriptRoot 'scripts/install-project.ts'), '--project', $Project, '--client', $Client.ToLowerInvariant())
+if ($Upgrade) { $arguments += '--upgrade' }
 if ($Write) { $arguments += '--write' }
 if ($WithServices) { $arguments += '--with-services' }
 & bun @arguments
