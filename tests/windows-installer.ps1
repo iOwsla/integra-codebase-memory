@@ -7,7 +7,7 @@ function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Me
 function Must-Fail([scriptblock]$Action) {
     $failed = $false
     try { & $Action | Out-Null } catch { $failed = $true }
-    Assert $failed 'Expected an error.'
+    Assert $failed "Expected an error: $Action"
 }
 try {
     $project = Join-Path $temporary 'target project [one]'
@@ -57,7 +57,7 @@ try {
         if ($args[0] -eq 'clone') {
             $destination = $args[-1]
             [void][IO.Directory]::CreateDirectory($destination)
-            if ($script:failDownload) { $global:LASTEXITCODE = 8; return }
+            if ($global:CodeMemoryTestFailDownload) { $global:LASTEXITCODE = 8; return }
             [void][IO.Directory]::CreateDirectory((Join-Path $destination '.git'))
             Set-Content -LiteralPath (Join-Path $destination 'install.ps1') -Value 'param($Project, $Client, [switch]$Write) if (-not $Write) { throw "Missing write" }; Set-Content -LiteralPath (Join-Path $PSScriptRoot "received.txt") -Value "$Project|$Client"'
         } elseif ($args[2] -eq 'remote') { 'https://github.com/iOwsla/integra-codebase-memory.git' }
@@ -65,18 +65,18 @@ try {
     }
     function bun {
         $global:LASTEXITCODE = 0
-        if ($script:failDependencies) { $global:LASTEXITCODE = 7; return }
+        if ($global:CodeMemoryTestFailDependencies) { $global:LASTEXITCODE = 7; return }
         Assert (($args -join ' ') -eq 'install --frozen-lockfile --ignore-scripts') 'Unexpected Bun command.'
         [void][IO.Directory]::CreateDirectory((Join-Path (Get-Location).Path 'node_modules'))
     }
-    $script:failDownload = $false
-    $script:failDependencies = $false
+    $global:CodeMemoryTestFailDownload = $false
+    $global:CodeMemoryTestFailDependencies = $false
     & $bootstrap -Project $project -Client both -InstallDir $runtime -Write | Out-Null
     & $bootstrap -Project $project -Client both -InstallDir $runtime -Write | Out-Null
     Assert ((Get-Content -LiteralPath (Join-Path $runtime 'received.txt') -Raw).Trim() -eq "$project|both") 'Lost project/client arguments.'
     foreach ($failure in @('download', 'dependencies')) {
-        $script:failDownload = $failure -eq 'download'
-        $script:failDependencies = $failure -eq 'dependencies'
+        $global:CodeMemoryTestFailDownload = $failure -eq 'download'
+        $global:CodeMemoryTestFailDependencies = $failure -eq 'dependencies'
         $failedRuntime = Join-Path $temporary $failure
         Must-Fail { & $bootstrap -Project $project -Client both -InstallDir $failedRuntime -Write }
         Assert (-not (Test-Path -LiteralPath $failedRuntime)) 'Failed runtime was published.'
