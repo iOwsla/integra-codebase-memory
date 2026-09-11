@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha.8 — 2026-09-11
+
+### Added
+- Bounded watcher endurance regression: 12 change bursts, three parser failures with automatic retry, and four session restarts with offline additions and subsequent deletions.
+- A gated regression verifies that changes arriving during analysis are queued and converge without periodic reconciliation.
+- Graph preservation, stale-symbol removal, edge integrity and final no-op reconciliation assertions.
+
+### Scope
+- Runtime behavior is unchanged. These synthetic correctness tests do not establish hours-long stability, large-repository throughput or peak-memory bounds. Phases 9 and 10 remain open.
+
 ## 0.1.0-alpha.7 — 2026-09-11
 
 ### Changed

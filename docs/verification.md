@@ -141,3 +141,13 @@ Local lint, type checking, CLI build and 77 tests across 12 files passed. The
 profiling CLI's bounded-stop smoke test passed, and a unit test checks complete
 graph equivalence with profiling enabled/disabled. See `parser-performance.md`
 for the real-project record comparison, CPU evidence and remaining gates.
+
+## Bounded watcher endurance (alpha.8)
+
+On 2026-09-11, all 79 tests across 13 files passed locally (38.78 seconds).
+Lint, TypeScript checking and the CLI build also passed. The new real-watcher
+regressions cover 12 change bursts, three injected parser failures, four session
+restarts with offline edits, and an explicitly blocked analysis with a later
+queued write. See hardening.md for assertions and test boundaries. No runtime
+fix was required by these scenarios. Multi-hour soak testing, large-repository
+publication/query acceptance and peak-memory bounds remain unverified.

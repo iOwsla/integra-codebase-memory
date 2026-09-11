@@ -116,3 +116,19 @@ a sampled JS heap metric, not total or peak process memory.
 
 The profiling callback is optional. Normal parsing does not emit profiles or
 sample the clock per AST node. Tests compare profiling and non-profiling graphs.
+
+## Bounded watcher endurance
+
+`tests/integration/watch-endurance.test.ts` runs 12 source-change bursts in a
+synthetic repository, including transient create/rename/delete operations. Three
+injected parser failures must preserve the complete last graph and recover via
+periodic reconciliation without another source edit. Four session restarts must
+index files created while closed and remove them after deletion. Every settled
+round checks the final function identity and edge endpoints; final indexing must
+be a no-op. A separate gated parser test holds an analysis open until a later
+write is queued, then checks convergence with periodic reconciliation set to one
+hour.
+
+These tests use real filesystem watching and a disposable CodeMemory database.
+They are bounded correctness regressions, not a multi-hour soak test or memory
+leak acceptance. Long-duration operation and peak-memory measurements remain open.
