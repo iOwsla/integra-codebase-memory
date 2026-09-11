@@ -7,6 +7,7 @@ import { createProjectContext } from "@codememory/shared";
 import type { Command } from "commander";
 import { installProject } from "../install-project";
 import { installManagementCli, listRegistrations, saveRegistration } from "./cli-state";
+import { CliProgress } from "./progress";
 import { databaseUrl, readService } from "./service-state";
 import { dockerExecutable, run, setupServices } from "./services";
 
@@ -14,15 +15,18 @@ const print = (value: unknown) => console.log(JSON.stringify(value, null, 2));
 async function indexProject(root: string, managed: boolean) {
   const context = await createProjectContext(root);
   const store = new PostgresStore(managed ? databaseUrl(await readService()) : undefined);
+  const progress = new CliProgress(context.canonicalRoot);
   try {
     await store.register(context);
     return await new IndexService(
       context,
       store,
-      new RepositoryScanner(),
-      new ProcessTypeScriptPlugin(),
+      new RepositoryScanner(progress.scan),
+      new ProcessTypeScriptPlugin(undefined, progress.parser),
+      progress.stage,
     ).index();
   } finally {
+    progress.close();
     await store.close();
   }
 }

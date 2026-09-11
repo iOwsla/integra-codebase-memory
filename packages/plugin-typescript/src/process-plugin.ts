@@ -3,7 +3,7 @@ import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 import type { Analysis, IndexedFile, ProjectContext } from "@codememory/core";
 import { CodeMemoryError } from "@codememory/core";
-import { TypeScriptPlugin } from "./index";
+import { type ParserProfileEvent, TypeScriptPlugin } from "./index";
 /** One parser subprocess per index job keeps MCP initialization/status responsive. */
 export class ProcessTypeScriptPlugin extends TypeScriptPlugin {
   override async analyze(
@@ -71,7 +71,22 @@ export class ProcessTypeScriptPlugin extends TypeScriptPlugin {
             pending = pending.slice(newline + 1);
             if (complete) throw new Error("Output after completion");
             const record = JSON.parse(line);
-            if (record.type === "complete") complete = true;
+            if (record.type === "progress") {
+              if (
+                !record.value ||
+                ![
+                  "WORKSPACE",
+                  "DECLARATIONS",
+                  "PROGRAM",
+                  "CHECKER",
+                  "SEMANTIC_FILE",
+                  "DEDUPLICATION",
+                  "COMPLETE",
+                ].includes(record.value.phase)
+              )
+                throw new Error("Invalid progress");
+              this.profile?.(record.value as ParserProfileEvent);
+            } else if (record.type === "complete") complete = true;
             else if (
               Object.hasOwn(analysis, record.type) &&
               record.value &&
@@ -100,7 +115,9 @@ export class ProcessTypeScriptPlugin extends TypeScriptPlugin {
           fail("Parser worker returned invalid JSON");
         }
       });
-      child.stdin.end(JSON.stringify({ context, files, configs: [...configs] }));
+      child.stdin.end(
+        JSON.stringify({ context, files, configs: [...configs], progress: !!this.profile }),
+      );
     });
   }
 }

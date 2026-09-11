@@ -5,7 +5,10 @@ import { configSchema, createProjectContext } from "@codememory/shared";
 
 // Offline acceptance: no database, source execution, builds or index publication.
 const root = process.argv[2];
-if (!root) throw new Error("Usage: bun scripts/verify-parser.ts /absolute/project [timeout-ms]");
+if (!root)
+  throw new Error(
+    "Usage: bun scripts/verify-parser.ts /absolute/project [timeout-ms] [--progress]",
+  );
 const selected = await createProjectContext(resolve(root));
 const context = {
   ...selected,
@@ -16,7 +19,15 @@ const context = {
     }),
   ),
 };
-const plugin = new ProcessTypeScriptPlugin();
+let progressEvents = 0;
+const plugin = new ProcessTypeScriptPlugin(
+  undefined,
+  process.argv[4] === "--progress"
+    ? () => {
+        progressEvents++;
+      }
+    : undefined,
+);
 const scanner = new RepositoryScanner();
 const started = performance.now();
 const scan = await scanner.scan(context, plugin.configurationReferences);
@@ -37,6 +48,7 @@ try {
     JSON.stringify(
       {
         mode: "offline-parser",
+        ...(process.argv[4] === "--progress" ? { progressEvents } : {}),
         parserVersion: plugin.version,
         scanMs,
         parseMs,

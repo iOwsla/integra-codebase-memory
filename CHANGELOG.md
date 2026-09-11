@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-alpha.16 — 2026-09-12
+
+- Report syntax diagnostic kind/code and one-based line/column, bounded diagnostic pages, affected-file totals and explicit incomplete reasons. Split exclusion counts by file/directory/reason; retain valid-file queries when other files have syntax errors.
+- Mark symbol/context preview truncation independently of index coverage, report returned lines and continuation guidance. Shrink oversized MCP result pages without skipping records; preserve coverage truth on response-size errors.
+- Expose runtime version/PID/session, durable index-job ownership, supported source scope and unresolved-reference counts. Correlate public errors with redacted stderr diagnostic IDs; verify installer runtime targets before changing settings.
+
+- Add throttled CLI index progress for scanning files, parser phases, publication and completion/failure. Keep stdout JSON clean; support `index --no-progress`.
+- Add read-only `status --watch` and JSON-lines monitoring of durable job stages, including interrupted-job reporting. Published graph counts remain distinct from current work.
+- Forward optional parser progress over the worker protocol for managed CLI workflows without mixing it into graph records or MCP output. Preserve foreground indexing behavior for existing large-project CLI users.
+- Test progress throttling, terminal-control sanitization, quiet output, parser transport and end-to-end indexing/status monitoring; include a native Windows worker progress check.
+
 ## 0.1.0-alpha.15 — 2026-09-12
 
 - Stream parser output as bounded newline-delimited records, replacing the fixed 256 MiB buffered JSON transport. Add validated `parserOutputLimitMiB` (default 1024, range 1–8192) and preserve safe parser diagnostics in MCP session status.

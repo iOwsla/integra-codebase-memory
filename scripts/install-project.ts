@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { createProjectContext } from "@codememory/shared";
 import { Command } from "commander";
@@ -166,6 +166,10 @@ export async function installProject(
     });
   };
   const entry = resolve(serverRoot, managed ? "scripts/managed-mcp.ts" : "apps/cli/src/index.ts");
+  if (!(await stat(process.execPath)).isFile() || !(await stat(entry)).isFile())
+    throw new Error(
+      "Selected runtime executable or MCP entry is missing; reinstall this release before updating project settings",
+    );
   const args = [entry, "mcp", "--project", selected, "--auto-index", "--watch"];
   if (client !== "claude") {
     // Reuse the existing Codex configuration generator without writing anything.
@@ -279,6 +283,7 @@ export async function installProject(
     projectRoot: selected,
     client,
     applied: write,
+    runtimeVerified: true,
     upgrade,
     ...(backupDirectory ? { backupDirectory } : {}),
     changedFiles: changed.map((edit) => edit.path),

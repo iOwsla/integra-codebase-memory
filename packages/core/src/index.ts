@@ -86,7 +86,14 @@ export interface Analysis {
   symbols: CodeSymbol[];
   edges: SymbolEdge[];
   unresolved: UnresolvedReference[];
-  diagnostics: { file: string; message: string }[];
+  diagnostics: {
+    file: string;
+    message: string;
+    kind?: "SYNTAX_ERROR" | "CONFIGURATION";
+    line?: number;
+    column?: number;
+    code?: number;
+  }[];
 }
 export interface Snapshot extends Analysis {
   files: IndexedFile[];
@@ -133,11 +140,22 @@ export interface MemorySearch {
   limit: number;
   offset: number;
 }
+export interface ExclusionSummary {
+  files: number;
+  directories: number;
+  other: number;
+  byReason: Record<string, { files: number; directories: number; other: number }>;
+}
+export interface StatusOptions {
+  diagnosticLimit?: number;
+  diagnosticOffset?: number;
+}
 export interface IndexResult {
   version: number;
   changed: number;
   deleted: number;
   excluded: number;
+  exclusions?: ExclusionSummary;
   reason: string;
   indexedAt: string | null;
 }
@@ -213,7 +231,7 @@ export interface ProjectStore {
     run: IndexResult,
   ): Promise<void>;
   recordFailure(context: ProjectContext, message: string): Promise<void>;
-  status(context: ProjectContext): Promise<Record<string, unknown>>;
+  status(context: ProjectContext, options?: StatusOptions): Promise<Record<string, unknown>>;
   saveMemory(context: ProjectContext, memory: MemoryEntry, supersedes?: string): Promise<void>;
   memories(context: ProjectContext): Promise<MemoryEntry[]>;
   searchMemories(
@@ -251,7 +269,12 @@ export interface FileScanner {
   scan(
     context: ProjectContext,
     references?: ConfigurationReferences,
-  ): Promise<{ files: IndexedFile[]; configs: Map<string, string>; excluded: number }>;
+  ): Promise<{
+    files: IndexedFile[];
+    configs: Map<string, string>;
+    excluded: number;
+    exclusions?: ExclusionSummary;
+  }>;
 }
 export interface GitProvider {
   inspect(root: string): Promise<{ branch: string | null; head: string | null }>;

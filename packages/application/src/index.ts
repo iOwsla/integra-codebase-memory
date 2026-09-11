@@ -2,7 +2,7 @@ import { relative } from "node:path";
 import type { ProjectContext, ProjectStore } from "@codememory/core";
 import type { ProjectSession } from "@codememory/indexer";
 import { MemoryService, memorySearchSchema } from "@codememory/memory";
-import { safePath, slash } from "@codememory/shared";
+import { runtimeInfo, safePath, slash } from "@codememory/shared";
 import { z } from "zod";
 
 const paging = {
@@ -11,7 +11,12 @@ const paging = {
 };
 const symbol = { symbolId: z.string().max(100).optional(), name: z.string().max(500).optional() };
 export const schemas = {
-  codebase_status: z.object({}).strict(),
+  codebase_status: z
+    .object({
+      diagnosticLimit: z.number().int().min(1).max(20).default(10),
+      diagnosticOffset: z.number().int().min(0).max(100000).default(0),
+    })
+    .strict(),
   search_symbols: z
     .object({
       query: z.string().min(1).max(500),
@@ -58,22 +63,37 @@ export class CodebaseService {
   ) {
     this.memory = new MemoryService(context, store);
   }
-  async status() {
-    return this.session
-      ? this.session.status()
+  async status(input: unknown = {}): Promise<Record<string, unknown>> {
+    const options = schemas.codebase_status.parse(input);
+    const status = this.session
+      ? await this.session.status(options)
       : {
           projectRoot: this.context.canonicalRoot,
           projectScopeId: this.context.projectScopeId,
           projectSource: "explicit --project",
           autoIndex: false,
           watcher: false,
-          ...(await this.store.status(this.context)),
+          ...(await this.store.status(this.context, options)),
         };
+    return {
+      ...status,
+      runtime: { ...runtimeInfo(), sessionId: this.context.sessionId },
+      analysisScope: {
+        languages: ["JavaScript", "TypeScript"],
+        extensions: [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"],
+        unsupportedExamples: ["Kotlin", "Prisma"],
+        include: this.context.effectiveConfig.include,
+        exclude: this.context.effectiveConfig.exclude,
+        excludeGenerated: this.context.effectiveConfig.excludeGenerated,
+        maxFileSizeBytes: this.context.effectiveConfig.maxFileSizeBytes,
+        limitations:
+          "Static in-scope sources only. Indexed files do not imply resolved dynamic references. Check unresolvedReferences, exclusions and source before dead-code claims.",
+      },
+    };
   }
   async execute(name: keyof typeof schemas, input: unknown): Promise<Record<string, unknown>> {
     if (name === "codebase_status") {
-      schemas.codebase_status.parse(input);
-      return this.status();
+      return this.status(input);
     }
     if (name === "search_memory") {
       const p = schemas.search_memory.parse(input);

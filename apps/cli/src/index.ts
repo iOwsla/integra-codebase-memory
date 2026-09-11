@@ -19,12 +19,13 @@ import {
 import { Command } from "commander";
 import { assertProjectEnabled, listRegistrations } from "../../../scripts/setup/cli-state";
 import { managementError, registerManagementCommands } from "../../../scripts/setup/management";
+import { CliProgress } from "../../../scripts/setup/progress";
 import { databaseUrl, readService } from "../../../scripts/setup/service-state";
 
 const cli = new Command()
   .name("codememory")
   .description("Local, explicitly project-scoped code intelligence")
-  .version("0.1.0-alpha.15");
+  .version("0.1.0-alpha.16");
 registerManagementCommands(cli);
 cli
   .command("updates")
@@ -43,14 +44,20 @@ async function selectedStore(root: string) {
 }
 const collect = (value: string, previous: string[]) => [...previous, value];
 const print = (v: unknown) => process.stdout.write(`${JSON.stringify(v, null, 2)}\n`);
-async function open(project?: string) {
+async function open(project?: string, progress?: CliProgress) {
   const context = await createProjectContext(project ?? process.cwd());
   const store = await selectedStore(context.canonicalRoot);
   await store.register(context).catch(async (e) => {
     await store.close();
     throw e;
   });
-  const indexer = new IndexService(context, store, new RepositoryScanner(), new TypeScriptPlugin());
+  const indexer = new IndexService(
+    context,
+    store,
+    new RepositoryScanner(progress?.scan),
+    new TypeScriptPlugin(undefined, progress?.parser),
+    progress?.stage,
+  );
   const service = new CodebaseService(context, store);
   return { context, store, indexer, service };
 }
@@ -87,14 +94,27 @@ for (const name of ["init", "add"])
   );
 scoped("index [path]", "Index or incrementally reconcile selected source scope")
   .option("--force", "Rebuild index for parser/config changes")
-  .action(async (_path: string | undefined, options: { project: string; force?: boolean }) => {
-    const app = await open(options.project ?? (_path ? resolve(_path) : undefined));
-    try {
-      print(await app.indexer.index(options.force));
-    } finally {
-      await app.store.close();
-    }
-  });
+  .option("--no-progress", "Suppress live stderr progress; retain JSON result")
+  .action(
+    async (
+      _path: string | undefined,
+      options: { project?: string; force?: boolean; progress: boolean },
+    ) => {
+      const root = options.project ?? resolve(_path ?? process.cwd());
+      const progress = new CliProgress(root, options.progress);
+      let app: Awaited<ReturnType<typeof open>> | undefined;
+      try {
+        app = await open(root, progress);
+        const result = await app.indexer.index(options.force);
+        progress.close();
+        print(result);
+      } finally {
+        progress.close();
+        await app?.store.close();
+      }
+    },
+  );
+
 for (const [command, tool] of [
   ["dead-code", "find_dead_code_candidates"],
   ["duplicates", "find_duplicate_code"],
@@ -115,14 +135,43 @@ for (const [command, tool] of [
         await app.store.close();
       }
     });
-scoped("status", "Selected project status").action(async (options) => {
-  const app = await open(options.project);
-  try {
-    print(await app.service.status());
-  } finally {
-    await app.store.close();
-  }
-});
+scoped("status", "Selected project status; --watch follows the durable index stages")
+  .option("--watch", "Refresh status every two seconds until Ctrl+C; does not start indexing")
+  .option("--json", "With --watch, emit JSON lines instead of a terminal display")
+  .option("--diagnostic-limit <number>", "Diagnostic messages per page (1–20)", "10")
+  .option("--diagnostic-offset <number>", "Diagnostic message offset", "0")
+  .action(async (options) => {
+    const context = await createProjectContext(options.project ?? process.cwd());
+    const store = await selectedStore(context.canonicalRoot);
+    const service = new CodebaseService(context, store);
+    let stopped = false;
+    const stop = () => {
+      stopped = true;
+    };
+    const progress =
+      options.watch && !options.json
+        ? new CliProgress(context.canonicalRoot, true, process.stderr, false)
+        : undefined;
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+    try {
+      do {
+        const value = await service.status({
+          diagnosticLimit: Number(options.diagnosticLimit),
+          diagnosticOffset: Number(options.diagnosticOffset),
+        });
+        if (progress) progress.status(value);
+        else if (options.watch) process.stdout.write(`${JSON.stringify(value)}\n`);
+        else print(value);
+        if (options.watch && !stopped) await new Promise((resolve) => setTimeout(resolve, 2000));
+      } while (options.watch && !stopped);
+    } finally {
+      progress?.close();
+      process.removeListener("SIGINT", stop);
+      process.removeListener("SIGTERM", stop);
+      await store.close();
+    }
+  });
 scoped("doctor", "Diagnose selected project and database").action(async (options) => {
   const app = await open(options.project);
   try {
@@ -137,7 +186,7 @@ scoped("doctor", "Diagnose selected project and database").action(async (options
       () => null,
     );
     print({
-      runtime: Bun.version,
+      bunVersion: Bun.version,
       ...(await app.store.diagnostics()),
       git,
       parser: new TypeScriptPlugin().version,

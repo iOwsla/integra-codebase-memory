@@ -5,6 +5,7 @@ import type {
   LanguagePlugin,
   ProjectContext,
   ProjectStore,
+  StatusOptions,
 } from "@codememory/core";
 import { CodeMemoryError } from "@codememory/core";
 import { hash, log } from "@codememory/shared";
@@ -18,6 +19,7 @@ export class IndexService {
     private readonly store: ProjectStore,
     private readonly scanner: FileScanner,
     private readonly plugin: LanguagePlugin,
+    private readonly observe?: (progress: Readonly<IndexProgress>) => void,
   ) {}
   async index(force = false): Promise<IndexResult> {
     return this.store.locked(this.context, async (store) => {
@@ -29,6 +31,7 @@ export class IndexService {
       };
       const record = async () => {
         progress.updatedAt = new Date().toISOString();
+        this.observe?.({ ...progress });
         await store.recordIndexProgress(this.context, progress);
       };
       await record();
@@ -71,6 +74,7 @@ export class IndexService {
             changed: 0,
             deleted: 0,
             excluded: scan.excluded,
+            exclusions: scan.exclusions,
             reason: "UNCHANGED",
             indexedAt: old.indexedAt,
           };
@@ -92,6 +96,7 @@ export class IndexService {
           changed: changed.length,
           deleted: deleted.length,
           excluded: scan.excluded,
+          exclusions: scan.exclusions,
           reason,
           indexedAt,
         };
@@ -104,12 +109,13 @@ export class IndexService {
           deleted,
           result,
         );
-        log("info", "index_completed", {
-          scope: this.context.projectScopeId,
-          sessionId: this.context.sessionId,
-          durationMs: Date.now() - started,
-          ...result,
-        });
+        if (!this.observe)
+          log("info", "index_completed", {
+            scope: this.context.projectScopeId,
+            sessionId: this.context.sessionId,
+            durationMs: Date.now() - started,
+            ...result,
+          });
         progress.state = "SUCCEEDED";
         progress.stage = "COMPLETE";
         progress.version = result.version;
@@ -198,8 +204,8 @@ export class ProjectSession {
       if (this.pending.size && !this.closing) this.schedule("queued");
     }
   }
-  async status() {
-    const persisted = await this.store.status(this.context);
+  async status(options?: StatusOptions) {
+    const persisted = await this.store.status(this.context, options);
     return {
       projectRoot: this.context.canonicalRoot,
       projectScopeId: this.context.projectScopeId,

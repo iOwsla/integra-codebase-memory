@@ -22,6 +22,7 @@ export interface ParserProfileEvent {
     | "DEDUPLICATION"
     | "COMPLETE";
   durationMs: number;
+  completedFiles?: number;
   file?: string;
   files?: number;
   symbols?: number;
@@ -32,12 +33,12 @@ export interface ParserProfileEvent {
 /** Compiler input is an in-memory allowlist produced by the bounded scanner. */
 export class TypeScriptPlugin implements LanguagePlugin {
   readonly id = "typescript";
-  readonly version = `5:${ts.version}`;
+  readonly version = `6:${ts.version}`;
   readonly configurationReferences = configurationReferences;
   readonly extensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
   constructor(
     private readonly observe: (path: string) => void = () => {},
-    private readonly profile?: (event: ParserProfileEvent) => void,
+    protected readonly profile?: (event: ParserProfileEvent) => void,
   ) {}
   async analyze(
     context: ProjectContext,
@@ -46,6 +47,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
   ): Promise<Analysis> {
     const clock = () => (this.profile ? performance.now() : 0);
     const begun = clock();
+    let completedFiles = 0;
     const result: Analysis = { symbols: [], edges: [], unresolved: [], diagnostics: [] };
     const workspace = new CompilerWorkspace(context, files, configs, result.diagnostics);
     this.profile?.({ phase: "WORKSPACE", durationMs: clock() - begun, files: files.length });
@@ -384,11 +386,17 @@ export class TypeScriptPlugin implements LanguagePlugin {
           root = fileSymbols.get(path);
         if (!sf || !root) continue;
         const fileStart = clock();
-        for (const d of program.getSyntacticDiagnostics(sf))
+        for (const d of program.getSyntacticDiagnostics(sf)) {
+          const location =
+            d.start === undefined ? undefined : sf.getLineAndCharacterOfPosition(d.start);
           result.diagnostics.push({
+            kind: "SYNTAX_ERROR",
+            code: d.code,
+            ...(location ? { line: location.line + 1, column: location.character + 1 } : {}),
             file: root.file,
             message: ts.flattenDiagnosticMessageText(d.messageText, " ").slice(0, 2000),
           });
+        }
         const lineOf = (node: ts.Node) =>
           sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
         const unresolved = (node: ts.Node, owner: CodeSymbol, type: string) => {
@@ -504,6 +512,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
         ts.forEachChild(sf, (n) => visit(n, root, root));
         this.profile?.({
           phase: "SEMANTIC_FILE",
+          completedFiles: ++completedFiles,
           durationMs: clock() - fileStart,
           file: root.file,
           edges: result.edges.length,

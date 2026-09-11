@@ -82,6 +82,7 @@ export class CompilerWorkspace {
   }
   private diagnostic(file: string, message: string) {
     this.diagnostics.push({
+      kind: "CONFIGURATION",
       file: slash(relative(this.context.canonicalRoot, file)),
       message: message.slice(0, 2000),
     });

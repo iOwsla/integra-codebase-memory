@@ -2,7 +2,7 @@
 
 Local code intelligence and explicit project memory for MCP coding agents. Bun + TypeScript Compiler API + PostgreSQL. No telemetry, LLM inference, embeddings or external code uploads.
 
-**Development foundation (`0.1.0-alpha.15`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 14 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
+**Development foundation (`0.1.0-alpha.16`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 14 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
 
 Management commands and reboot recovery: [CLI guide](docs/installation.md). Large project parser settings: [indexing guide](docs/indexing.md).
 
@@ -13,14 +13,14 @@ Open a terminal **inside the project you want to index**. Install Bun 1.3.3+ and
 ### macOS and Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.15/bootstrap.sh | sh -s -- --project "$PWD" --client both --write
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.16/bootstrap.sh | sh -s -- --project "$PWD" --client both --write
 export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/integra-code-memory/cli/bin:$PATH"
 ```
 
 ### Windows PowerShell 5.1 or 7
 
 ```powershell
-$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.15/bootstrap.ps1').Content
+$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.16/bootstrap.ps1').Content
 & ([scriptblock]::Create($installer)) -Project (Get-Location).Path -Client both -Write
 $env:Path = "$env:LOCALAPPDATA\integra-code-memory\cli\bin;$env:Path"
 ```
@@ -45,18 +45,18 @@ On Windows use `codememory system setup --project (Get-Location).Path` from the 
 ### Windows: upgrade from alpha.13 or an external database
 
 ```powershell
-$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.15/bootstrap.ps1').Content
+$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.16/bootstrap.ps1').Content
 & ([scriptblock]::Create($installer)) -Project (Get-Location).Path -Client both -Upgrade -SkipServices -Write
 $env:Path = "$env:LOCALAPPDATA\integra-code-memory\cli\bin;$env:Path"
 codememory --version
 ```
 
-For an **alpha.14 managed Docker/PostgreSQL installation**, omit `-SkipServices`. Keep the same client choice you originally installed. `-SkipServices` preserves an external database connection; it does not migrate that database.
+For an **alpha.14/alpha.15 managed Docker/PostgreSQL installation**, omit `-SkipServices`. Keep the same client choice you originally installed. `-SkipServices` preserves an external database connection; it does not migrate that database.
 
 ### macOS and Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.15/bootstrap.sh | sh -s -- --project "$PWD" --client both --upgrade --write
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.16/bootstrap.sh | sh -s -- --project "$PWD" --client both --upgrade --write
 export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/integra-code-memory/cli/bin:$PATH"
 codememory --version
 ```
@@ -65,7 +65,7 @@ Add `--skip-services` when upgrading alpha.13 or another external-database insta
 
 `--upgrade` / `-Upgrade` retargets recognizable same-project Bun MCP entries, preserves other MCP servers and custom settings, and backs up changed existing files outside the repository. The result prints `backupDirectory`. Custom commands, modified arguments, different project roots or ambiguous TOML require manual review. Omit the write flag for a preview. Existing runtimes, index data and memories are retained; managed migrations are forward-only.
 
-After success, reopen/reload the MCP connection and ask the assistant to call `codebase_status`. CLI version should be `0.1.0-alpha.15`; allow indexing to finish before expecting `READY`. To roll back connection settings, close the connection, restore its `.codex/config.toml` / `.mcp.json` from the reported backup, and reopen the previous runtime. This does not roll back database migrations.
+After success, reopen/reload the MCP connection and ask the assistant to call `codebase_status`. CLI version should be `0.1.0-alpha.16`; allow indexing to finish before expecting `READY`. To roll back connection settings, close the connection, restore its `.codex/config.toml` / `.mcp.json` from the reported backup, and reopen the previous runtime. This does not roll back database migrations.
 
 ## Everyday CLI commands
 
@@ -75,6 +75,7 @@ Run from the selected project's directory; adding or indexing it needs no path a
 codememory projects add --client both
 codememory index
 codememory status
+codememory status --watch
 codememory projects list
 codememory projects remove --yes
 codememory updates
@@ -85,6 +86,12 @@ Use `projects add --no-index` while the database is not ready. Add `--external-d
 `projects remove --yes` disables future sessions and retains source, index and memory. Close existing sessions first. The older top-level `remove --yes` command purges database content and is a different operation.
 
 `system start` prepares/starts managed services. `system restart --project /absolute/project` recreates the managed PostgreSQL container, retains its volume and indexes only that registered project. Existing MCP sessions may need reconnecting. See [CLI and recovery details](docs/installation.md).
+
+`index` displays live scan/analysis/publication progress on stderr, including
+sampled file names and elapsed time. Its final stdout result remains JSON.
+Use `index --no-progress` to silence it. In another terminal, `status --watch`
+follows durable job stages without starting indexing; add `--json` for JSON lines.
+[Progress semantics and output controls](docs/installation.md#live-indexing-progress).
 
 ## Large project parser settings
 
@@ -172,3 +179,23 @@ Use `find_dead_code_candidates` and `find_duplicate_code` through MCP, or run
 `bun run dev dead-code --project /absolute/project` and
 `bun run dev duplicates --project /absolute/project` after indexing. See
 [report scope and limitations](docs/quality-reports.md).
+
+
+### Understand incomplete results
+
+`READY` means a published graph is available; it does not certify complete analysis.
+`status` / `codebase_status` now expose `incompleteReasons`, `diagnosticSummary`,
+`exclusions`, `analysisScope`, `runtime` and `lastIndexJob.owner`.
+Parser errors include one-based line/column and TypeScript diagnostic codes in
+`last_run.diagnostics`; `fileErrors` specifically describes file read failures.
+
+```powershell
+codememory.cmd status --diagnostic-limit 10 --diagnostic-offset 0
+# Next page, using diagnosticSummary.nextOffset:
+codememory.cmd status --diagnostic-limit 10 --diagnostic-offset 10
+```
+
+On macOS/Linux use `codememory`. MCP accepts the equivalent `diagnosticLimit`
+and `diagnosticOffset` arguments. See [coverage and diagnostics](docs/installation.md#coverage-and-diagnostics)
+for exclusions, preview continuation and process recovery. Alpha.16 uses parser
+revision 6, so the next index rebuilds metadata even when source files are unchanged.

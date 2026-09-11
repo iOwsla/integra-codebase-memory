@@ -67,7 +67,7 @@ try {
 
     if ($env:TEST_PUBLISHED_BOOTSTRAP -eq 'true') {
         $downloadedScript = Join-Path $temporary 'downloaded-bootstrap.ps1'
-        Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.15/bootstrap.ps1' -OutFile $downloadedScript
+        Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.16/bootstrap.ps1' -OutFile $downloadedScript
         $liveProject = Join-Path $temporary 'downloaded target'
         [void][IO.Directory]::CreateDirectory($liveProject)
         $liveRuntime = Join-Path $temporary 'downloaded runtime'
@@ -77,6 +77,11 @@ try {
         Assert ($liveConfig.mcpServers.integra_code_memory.args[3] -eq $liveProject) 'Published bootstrap selected the wrong project.'
         Write-Output 'Published PowerShell download and repeat installation passed.'
     }
+
+    $parserCheck = & bun (Join-Path $repositoryRoot 'scripts/verify-parser.ts') (Join-Path $repositoryRoot 'tests/fixtures/typescript/regression-005-call-owners') 120000 --progress | ConvertFrom-Json
+    Assert ($LASTEXITCODE -eq 0) 'Parser with progress failed.'
+    Assert ($parserCheck.progressEvents -gt 0) 'No parser progress crossed the worker pipe.'
+    Assert ($parserCheck.danglingEdges -eq 0) 'Progress changed graph integrity.'
 
     # Stub network/dependency commands; exercise bootstrap orchestration on real Windows paths.
     function git {
@@ -88,7 +93,7 @@ try {
             [void][IO.Directory]::CreateDirectory((Join-Path $destination '.git'))
             Set-Content -LiteralPath (Join-Path $destination 'install.ps1') -Value 'param($Project, $Client, [switch]$Write, [switch]$WithServices) if (-not $Write) { throw "Missing write" }; Set-Content -LiteralPath (Join-Path $PSScriptRoot "received.txt") -Value "$Project|$Client"'
         } elseif ($args[2] -eq 'remote') { 'https://github.com/iOwsla/integra-codebase-memory.git' }
-        elseif ($args[2] -eq 'describe') { 'v0.1.0-alpha.15' }
+        elseif ($args[2] -eq 'describe') { 'v0.1.0-alpha.16' }
     }
     function bun {
         $global:LASTEXITCODE = 0

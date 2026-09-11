@@ -9,9 +9,10 @@ import type {
   ProjectContext,
   ProjectStore,
   Snapshot,
+  StatusOptions,
 } from "@codememory/core";
 import { CodeMemoryError } from "@codememory/core";
-import { log, projectName } from "@codememory/shared";
+import { log, projectName, runtimeInfo } from "@codememory/shared";
 import pg from "pg";
 import { PostgresIndexReader } from "./reader";
 import { migrations } from "./schema";
@@ -84,7 +85,7 @@ export class PostgresStore implements ProjectStore {
       if (!lock.rows[0]?.acquired)
         throw new CodeMemoryError(
           "INDEX_BUSY",
-          "Selected project is being indexed by another process",
+          "Selected project is being indexed by another process; inspect status.lastIndexJob.owner and lockActive, then wait or reconnect the outdated client",
         );
       return await action(new PostgresStore(undefined, conn, this.pool));
     } finally {
@@ -267,20 +268,55 @@ export class PostgresStore implements ProjectStore {
     if (!this.connection) throw new Error("Index progress requires project lock");
     await this.query(
       "INSERT INTO index_jobs(repository_id,backend_pid,data) VALUES($1,pg_backend_pid(),$2) ON CONFLICT(repository_id) DO UPDATE SET backend_pid=EXCLUDED.backend_pid,data=EXCLUDED.data",
-      [c.projectScopeId, JSON.stringify({ ...progress, sessionId: c.sessionId })],
+      [
+        c.projectScopeId,
+        JSON.stringify({
+          ...progress,
+          sessionId: c.sessionId,
+          owner: { ...runtimeInfo(), sessionId: c.sessionId },
+        }),
+      ],
     );
   }
-  async status(c: ProjectContext) {
+  async status(c: ProjectContext, options: StatusOptions = {}) {
+    const limit = options.diagnosticLimit ?? 10,
+      offset = options.diagnosticOffset ?? 0;
+    if (
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 20 ||
+      !Number.isInteger(offset) ||
+      offset < 0 ||
+      offset > 100000
+    )
+      throw new CodeMemoryError("INVALID_ARGUMENT", "Invalid diagnostic pagination");
     const r = await this.query(
-      `SELECT version,fingerprint,indexed_at,
-      (version=0 OR EXISTS(SELECT 1 FROM files WHERE repository_id=$1 AND data->>'status'<>'INDEXED') OR COALESCE((SELECT jsonb_array_length(data->'diagnostics')>0 FROM index_runs WHERE repository_id=$1 ORDER BY id DESC LIMIT 1),false)) AS incomplete,
+      `WITH last AS (SELECT data FROM index_runs WHERE repository_id=$1 ORDER BY id DESC LIMIT 1),
+      diagnostics AS (SELECT value,ordinality FROM last,jsonb_array_elements(COALESCE(data->'diagnostics','[]'::jsonb)) WITH ORDINALITY),
+      page AS (SELECT value,ordinality FROM diagnostics ORDER BY ordinality LIMIT $2 OFFSET $3),
+      gaps AS (SELECT data->>'status' AS reason,count(*)::int AS files,(array_agg(path ORDER BY path))[1:20] AS "sampleFiles",count(*)>20 AS "hasMoreFiles" FROM files WHERE repository_id=$1 AND data->>'status'<>'INDEXED' GROUP BY data->>'status'),
+      reasons AS (SELECT COALESCE(value->>'kind','DIAGNOSTIC') AS reason,count(*)::int AS messages,count(DISTINCT value->>'file')::int AS files,(array_agg(DISTINCT value->>'file' ORDER BY value->>'file'))[1:20] AS "sampleFiles",count(DISTINCT value->>'file')>20 AS "hasMoreFiles" FROM diagnostics GROUP BY COALESCE(value->>'kind','DIAGNOSTIC'))
+      SELECT version,fingerprint,indexed_at,
+      (version=0 OR EXISTS(SELECT 1 FROM gaps) OR EXISTS(SELECT 1 FROM diagnostics)) AS incomplete,
       (SELECT coalesce(jsonb_agg(errors),'[]'::jsonb) FROM (SELECT path,data->>'error' AS error FROM files WHERE repository_id=$1 AND data->>'status'='INDEX_ERROR' ORDER BY path LIMIT 20) errors) AS "fileErrors",
-      (SELECT count(*)::int FROM files WHERE repository_id=$1) AS files,(SELECT count(*)::int FROM symbols WHERE repository_id=$1) AS symbols,(SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1) AS edges,(SELECT data FROM index_runs WHERE repository_id=$1 ORDER BY id DESC LIMIT 1) AS last_run FROM repositories WHERE id=$1`,
-      [c.projectScopeId],
+      (SELECT count(*)::int FROM files WHERE repository_id=$1) AS files,
+      (SELECT count(*)::int FROM symbols WHERE repository_id=$1) AS symbols,
+      (SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1) AS edges,
+      (SELECT count(*)::int FROM unresolved_references WHERE repository_id=$1) AS "unresolvedReferences",
+      (SELECT data || jsonb_build_object('diagnostics',(SELECT COALESCE(jsonb_agg(value ORDER BY ordinality),'[]'::jsonb) FROM page)) FROM last) AS last_run,
+      jsonb_build_object('total',(SELECT count(*)::int FROM diagnostics),'affectedFiles',(SELECT count(DISTINCT value->>'file')::int FROM diagnostics)) AS "diagnosticSummary",
+      (SELECT COALESCE(jsonb_agg(gaps ORDER BY reason),'[]'::jsonb) FROM gaps) AS "fileGaps",
+      (SELECT COALESCE(jsonb_agg(reasons ORDER BY reason),'[]'::jsonb) FROM reasons) AS "diagnosticReasons"
+      FROM repositories WHERE id=$1`,
+      [c.projectScopeId, limit, offset],
     );
+    const row = r.rows[0] ?? { version: 0, incomplete: true };
+    const { fileGaps = [], diagnosticReasons = [], ...status } = row;
+    const total = row.diagnosticSummary?.total ?? 0;
+    const hasMore = offset + limit < total;
     const job = (
       await this.query(
-        `SELECT j.data,
+        `SELECT j.data,j.backend_pid AS "databaseBackendPid",
       EXISTS(SELECT 1 FROM pg_locks l WHERE l.pid=j.backend_pid AND l.locktype='advisory' AND l.granted
         AND l.classid::bigint=((hashtextextended($1,0)>>32)&4294967295)
         AND l.objid::bigint=(hashtextextended($1,0)&4294967295) AND l.objsubid=1) AS active
@@ -290,10 +326,29 @@ export class PostgresStore implements ProjectStore {
     ).rows[0];
     const interrupted = job?.data.state === "RUNNING" && !job.active;
     return {
-      ...(r.rows[0] ?? { version: 0 }),
+      ...status,
+      diagnosticSummary: {
+        total,
+        affectedFiles: row.diagnosticSummary?.affectedFiles ?? 0,
+        limit,
+        offset,
+        hasMore,
+        nextOffset: hasMore ? offset + limit : null,
+      },
+      incompleteReasons: [
+        ...(row.version === 0 ? [{ reason: "NOT_INDEXED" }] : []),
+        ...fileGaps,
+        ...diagnosticReasons,
+      ],
+      excludedEntries: row.last_run?.excluded ?? 0,
+      exclusions: row.last_run?.exclusions
+        ? { available: true, ...row.last_run.exclusions }
+        : { available: false, legacyExcludedEntries: row.last_run?.excluded ?? 0 },
       lastIndexJob: job
         ? {
             ...job.data,
+            databaseBackendPid: job.databaseBackendPid,
+            lockActive: job.active,
             interrupted,
             recovery: interrupted
               ? "Run index for this project to reconcile the last completed graph"

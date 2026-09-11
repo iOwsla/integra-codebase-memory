@@ -110,12 +110,37 @@ export class PostgresIndexReader implements IndexReader {
     const rows = await this.query(
       `
       SELECT left(array_to_string((regexp_split_to_array(data->>'content', E'\\r?\\n'))[$3:$4], E'\\n'),4000) AS snippet,
+        length(array_to_string((regexp_split_to_array(data->>'content', E'\\r?\\n'))[$3:$4], E'\\n'))>4000 AS "characterTruncated",
         (SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1 AND target_id=$5) AS incoming,
         (SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1 AND source_id=$5) AS outgoing
       FROM files WHERE repository_id=$1 AND id=$2`,
       [symbol.fileId, symbol.startLine, Math.min(symbol.endLine, symbol.startLine + 15), symbol.id],
     );
-    return { symbol, ...rows[0] };
+    const row = rows[0];
+    const snippet = String(row?.snippet ?? "");
+    const returnedStartLine = symbol.startLine;
+    const returnedEndLine = returnedStartLine + snippet.split("\n").length - 1;
+    const snippetTruncated = !!row?.characterTruncated || returnedEndLine < symbol.endLine;
+    return {
+      symbol,
+      ...row,
+      snippetTruncated,
+      returnedStartLine,
+      returnedEndLine,
+      returnedEndLinePartial: !!row?.characterTruncated,
+      continuation: snippetTruncated
+        ? {
+            tool: "get_file_context",
+            arguments: {
+              path: symbol.file,
+              line: row?.characterTruncated ? returnedEndLine : returnedEndLine + 1,
+              before: 0,
+              after: 50,
+            },
+            note: "Continue through the symbol endLine. A partial line is repeated; if context also truncates that line, read the local source.",
+          }
+        : null,
+    };
   }
   async relationships(
     selector: SymbolSelector,
@@ -263,10 +288,15 @@ export class PostgresIndexReader implements IndexReader {
     )
       throw new CodeMemoryError("INVALID_RANGE", "Invalid bounded file context range");
     const start = Math.max(1, line - before);
-    const rows = await this.query<{ content: string; endLine: number; total: number }>(
+    const rows = await this.query<{
+      content: string;
+      endLine: number;
+      total: number;
+      characterTruncated: boolean;
+    }>(
       `
       WITH selected AS (SELECT regexp_split_to_array(data->>'content', E'\\r?\\n') AS lines FROM files WHERE repository_id=$1 AND path=$2 AND data->>'status'='INDEXED')
-      SELECT left(array_to_string(lines[$3:$4],E'\\n'),12000) AS content, least(cardinality(lines),$4) AS "endLine", cardinality(lines) AS total FROM selected`,
+      SELECT left(array_to_string(lines[$3:$4],E'\\n'),12000) AS content, length(array_to_string(lines[$3:$4],E'\\n'))>12000 AS "characterTruncated", least(cardinality(lines),$4) AS "endLine", cardinality(lines) AS total FROM selected`,
       [path, start, line + after],
     );
     if (!rows[0]) throw new CodeMemoryError("NOT_FOUND", "File not present in selected index");
@@ -278,6 +308,22 @@ export class PostgresIndexReader implements IndexReader {
       endLine: rows[0].endLine,
       content: rows[0].content,
       source: "indexed snapshot",
+      snippetTruncated: rows[0].characterTruncated,
+      returnedStartLine: start,
+      returnedEndLine: start + rows[0].content.split("\n").length - 1,
+      returnedEndLinePartial: rows[0].characterTruncated,
+      continuation: rows[0].characterTruncated
+        ? {
+            note: "Character limit reached. Read the local source if this line exceeds the context limit.",
+            path,
+            line: start + rows[0].content.split("\n").length - 1,
+          }
+        : rows[0].endLine < rows[0].total
+          ? {
+              tool: "get_file_context",
+              arguments: { path, line: rows[0].endLine + 1, before: 0, after: 50 },
+            }
+          : null,
     };
   }
   async trace(

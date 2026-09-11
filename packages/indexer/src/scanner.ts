@@ -2,6 +2,7 @@ import { lstat, readdir, readFile } from "node:fs/promises";
 import { extname, relative, resolve } from "node:path";
 import type {
   ConfigurationReferences,
+  ExclusionSummary,
   FileScanner,
   IndexedFile,
   ProjectContext,
@@ -17,6 +18,14 @@ export class RepositoryScanner implements FileScanner {
     const files: IndexedFile[] = [];
     const configs = new Map<string, string>();
     let excluded = 0;
+    const exclusions: ExclusionSummary = { files: 0, directories: 0, other: 0, byReason: {} };
+    const exclude = (kind: "files" | "directories" | "other", reason: string) => {
+      excluded++;
+      exclusions[kind]++;
+      exclusions.byReason[reason] ??= { files: 0, directories: 0, other: 0 };
+      const counts = exclusions.byReason[reason];
+      counts[kind]++;
+    };
     const matchesExclude = picomatch([...context.effectiveConfig.exclude]);
     const matchesInclude = context.effectiveConfig.include.length
       ? picomatch([...context.effectiveConfig.include])
@@ -39,16 +48,24 @@ export class RepositoryScanner implements FileScanner {
       for (const entry of await readdir(dir, { withFileTypes: true })) {
         const path = resolve(dir, entry.name),
           rel = slash(relative(context.canonicalRoot, path));
-        if (
-          forbidden(rel) ||
-          entry.isSymbolicLink() ||
-          matchesExclude(rel) ||
-          matchesExclude(`${rel}/`) ||
-          rules.some((r) =>
-            r.rules.ignores(slash(relative(r.base, path)) + (entry.isDirectory() ? "/" : "")),
-          )
-        ) {
-          excluded++;
+        const exclusionReason = forbidden(rel)
+          ? "PROTECTED_PATH"
+          : entry.isSymbolicLink()
+            ? "SYMLINK"
+            : matchesExclude(rel) || matchesExclude(`${rel}/`)
+              ? "CONFIG_EXCLUDE"
+              : rules.some((r) =>
+                    r.rules.ignores(
+                      slash(relative(r.base, path)) + (entry.isDirectory() ? "/" : ""),
+                    ),
+                  )
+                ? "GITIGNORE"
+                : undefined;
+        if (exclusionReason) {
+          exclude(
+            entry.isDirectory() ? "directories" : entry.isFile() ? "files" : "other",
+            exclusionReason,
+          );
           continue;
         }
         if (entry.isDirectory()) {
@@ -58,7 +75,7 @@ export class RepositoryScanner implements FileScanner {
               () => false,
             )
           ) {
-            excluded++;
+            exclude("directories", "NESTED_REPOSITORY");
             continue;
           }
           await walk(path, rules);
@@ -70,7 +87,7 @@ export class RepositoryScanner implements FileScanner {
         const source = /\.(?:[cm]?[jt]sx?)$/.test(entry.name);
         if (!source && !config) continue;
         if (!config && !matchesInclude(rel)) {
-          excluded++;
+          exclude("files", "NOT_INCLUDED");
           continue;
         }
         if (config) {
@@ -87,13 +104,11 @@ export class RepositoryScanner implements FileScanner {
             contentHash = "";
           if (info.size > context.effectiveConfig.maxFileSizeBytes) {
             status = "SKIPPED_TOO_LARGE";
-            excluded++;
           } else {
             this.observe("read", actual);
             const data = await readFile(actual);
             if (data.includes(0)) {
               status = "SKIPPED_BINARY";
-              excluded++;
             } else {
               content = data.toString("utf8");
               this.observe("hash", actual);
@@ -104,9 +119,10 @@ export class RepositoryScanner implements FileScanner {
             /(^|\/)(__generated__|generated)(\/|$)|\.generated\./.test(rel) ||
             /@generated|DO NOT EDIT|auto-generated/i.test(content.slice(0, 1024));
           if (generated && context.effectiveConfig.excludeGenerated) {
-            excluded++;
+            exclude("files", "GENERATED");
             continue;
           }
+          if (status !== "INDEXED") exclude("files", status);
           files.push({
             id: id(context.projectScopeId, rel),
             path: rel,
@@ -166,6 +182,6 @@ export class RepositoryScanner implements FileScanner {
       }
     }
     files.sort((a, b) => a.path.localeCompare(b.path));
-    return { files, configs, excluded };
+    return { files, configs, excluded, exclusions };
   }
 }

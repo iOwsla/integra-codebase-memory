@@ -265,3 +265,23 @@ typecheck and build. Upgrade E2E checks cover backups, no-write preview, retaine
 external database environment, unrelated MCP servers, repeated application and
 refusal of database-mode or project-scope changes. Native Windows upgrade checks
 are part of the release workflow rather than inferred from the macOS tests.
+
+
+## Alpha.16 progress and result clarity (2026-09-12)
+
+Local verification: lint, TypeScript check and CLI build passed. The full suite
+passed 139 tests across 25 files; subsequent affected MCP/diagnostic checks passed
+13 tests, followed by the final three response-contract tests. The offline worker
+check emitted six progress events with parser revision 6, 19 symbols, 43 edges,
+and zero duplicate/dangling/foreign records.
+
+Added coverage includes stderr progress versus stdout JSON, read-only status
+watch interruption, worker progress transport, syntax locations and diagnostic
+pagination, separate exclusion reasons, valid-source queries under incomplete
+coverage, runtime/job identity, long-function/long-line preview continuation and
+adaptive result pages traversed without loss. Fresh disposable databases were used.
+
+These are fixture-level checks. The reported large Windows repository completion
+and interactive latency remain user-reported observations, not local reproduction
+or concurrent-load acceptance. Automatic stale-process retirement, release-folder
+cleanup and full large-repository lifecycle testing remain open.

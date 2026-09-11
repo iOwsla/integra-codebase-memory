@@ -3,6 +3,10 @@ import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { CodeMemoryError, type ProjectContext } from "@codememory/core";
 import { z } from "zod";
+import { version } from "../package.json";
+
+const processStartedAt = new Date().toISOString();
+export const runtimeInfo = () => ({ version, pid: process.pid, startedAt: processStartedAt });
 export const hash = (value: string | Uint8Array) =>
   createHash("sha256").update(value).digest("hex");
 export const id = (...parts: string[]) => hash(JSON.stringify(parts));
@@ -116,9 +120,23 @@ export function log(level: string, event: string, fields: Record<string, unknown
     `${JSON.stringify({ time: new Date().toISOString(), level, event, ...fields })}\n`,
   );
 }
-export function publicError(error: unknown): { code: string; message: string } {
-  if (error instanceof CodeMemoryError) return { code: error.code, message: error.message };
-  return { code: "INTERNAL_ERROR", message: "Operation failed; inspect local diagnostics" };
+export function publicError(error: unknown): {
+  code: string;
+  message: string;
+  diagnosticId: string;
+} {
+  const diagnosticId = randomUUID();
+  const code = error instanceof CodeMemoryError ? error.code : "INTERNAL_ERROR";
+  // Never persist arbitrary exception messages, connection URLs or source text.
+  log("error", "operation_failed", { diagnosticId, code, ...runtimeInfo() });
+  return {
+    code,
+    message:
+      error instanceof CodeMemoryError
+        ? error.message
+        : "Operation failed; match diagnosticId in the CLI/client stderr log",
+    diagnosticId,
+  };
 }
 export const projectName = (context: ProjectContext) => basename(context.canonicalRoot);
 

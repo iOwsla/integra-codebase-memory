@@ -8,7 +8,11 @@ vi.mock("node:child_process", () => ({ spawn }));
 import type { ProjectContext } from "@codememory/core";
 import { ProcessTypeScriptPlugin } from "../../packages/plugin-typescript/src/process-plugin";
 
-function worker(timeoutMs?: number, parserOutputLimitMiB?: number) {
+function worker(
+  timeoutMs?: number,
+  parserOutputLimitMiB?: number,
+  profile?: ConstructorParameters<typeof ProcessTypeScriptPlugin>[1],
+) {
   const child = Object.assign(new EventEmitter(), {
     stdin: new PassThrough(),
     stdout: new PassThrough(),
@@ -16,7 +20,7 @@ function worker(timeoutMs?: number, parserOutputLimitMiB?: number) {
     kill: vi.fn(),
   });
   spawn.mockReturnValue(child);
-  const result = new ProcessTypeScriptPlugin().analyze(
+  const result = new ProcessTypeScriptPlugin(undefined, profile).analyze(
     { effectiveConfig: { parserTimeoutMs: timeoutMs, parserOutputLimitMiB } } as ProjectContext,
     [],
     new Map(),
@@ -117,4 +121,20 @@ it("accepts more than 256 MiB in bounded records without accumulating serialized
   child.emit("close", 0, null);
   expect((await result).diagnostics).toHaveLength(257);
   expect(child.kill).not.toHaveBeenCalled();
+});
+
+it("delivers parser progress separately from the resulting graph", async () => {
+  const profile = vi.fn();
+  const { child, result } = worker(undefined, undefined, profile);
+  child.stdout.emit(
+    "data",
+    Buffer.from(
+      '{"type":"progress","value":{"phase":"SEMANTIC_FILE","durationMs":2,"file":"a.ts","completedFiles":4}}\n{"type":"complete"}\n',
+    ),
+  );
+  child.emit("close", 0, null);
+  expect(profile).toHaveBeenCalledWith(
+    expect.objectContaining({ file: "a.ts", completedFiles: 4 }),
+  );
+  expect(await result).toEqual({ symbols: [], edges: [], unresolved: [], diagnostics: [] });
 });
