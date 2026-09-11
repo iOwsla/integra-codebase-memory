@@ -133,3 +133,11 @@ owner and no source read errors.
 - The final POS recheck after lazy processing retained the same graph counts,
   corrected caller and zero integrity failures. Its 64.97-second parser result
   is a single observation, not a controlled speedup or peak-memory claim.
+
+
+## Parser profiling and transient allocation work (alpha.7)
+
+Local lint, type checking, CLI build and 77 tests across 12 files passed. The
+profiling CLI's bounded-stop smoke test passed, and a unit test checks complete
+graph equivalence with profiling enabled/disabled. See `parser-performance.md`
+for the real-project record comparison, CPU evidence and remaining gates.

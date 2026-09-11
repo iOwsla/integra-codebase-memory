@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.0-alpha.7 — 2026-09-11
+
+### Changed
+- Parser declaration tables use numeric positions per canonical file; declaration classification, source text extraction and relationship line lookup avoid redundant work.
+- Edge deduplication no longer creates an intermediate key/value tuple array. Call resolution rules and parser revision remain unchanged.
+
+### Added
+- Optional parser phase profiling and `bun run profile:parser /absolute/project [semantic-file-limit]`, with explicit incomplete-stop reporting.
+- Profiling/non-profiling graph-equivalence coverage; 77 tests pass locally. Private application graph fingerprints match the original lookup implementation.
+- A documented CPU and memory investigation, including unsuccessful experiments and the limits of wall-time comparisons.
+
+### Known limitations
+- Full-project performance and memory acceptance remain open. No end-to-end speedup or stable-release readiness is claimed; see docs/parser-performance.md.
+
 ## 0.1.0-alpha.6 — 2026-09-11
 
 ### Fixed

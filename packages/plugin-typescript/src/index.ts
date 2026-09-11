@@ -11,24 +11,68 @@ import { hash, id } from "@codememory/shared";
 import ts from "typescript";
 import { CompilerWorkspace, configurationReferences } from "./workspace";
 
+export interface ParserProfileEvent {
+  phase:
+    | "WORKSPACE"
+    | "DECLARATIONS"
+    | "PROGRAM"
+    | "CHECKER"
+    | "SEMANTIC_FILE"
+    | "DEDUPLICATION"
+    | "COMPLETE";
+  durationMs: number;
+  file?: string;
+  files?: number;
+  symbols?: number;
+  edges?: number;
+  unresolved?: number;
+}
+
 /** Compiler input is an in-memory allowlist produced by the bounded scanner. */
 export class TypeScriptPlugin implements LanguagePlugin {
   readonly id = "typescript";
   readonly version = `4:${ts.version}`;
   readonly configurationReferences = configurationReferences;
   readonly extensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
-  constructor(private readonly observe: (path: string) => void = () => {}) {}
+  constructor(
+    private readonly observe: (path: string) => void = () => {},
+    private readonly profile?: (event: ParserProfileEvent) => void,
+  ) {}
   async analyze(
     context: ProjectContext,
     files: IndexedFile[],
     configs: Map<string, string>,
   ): Promise<Analysis> {
+    const clock = () => (this.profile ? performance.now() : 0);
+    const begun = clock();
     const result: Analysis = { symbols: [], edges: [], unresolved: [], diagnostics: [] };
     const workspace = new CompilerWorkspace(context, files, configs, result.diagnostics);
+    this.profile?.({ phase: "WORKSPACE", durationMs: clock() - begun, files: files.length });
     const symbolIds = new Map<string, CodeSymbol>();
-    const declarations = new Map<string, CodeSymbol>();
+    const declarations = new Map<string, Map<number, CodeSymbol>>();
     const fileSymbols = new Map<string, CodeSymbol>();
-    const key = (n: ts.Node) => `${resolve(n.getSourceFile().fileName)}:${n.getStart()}`;
+    const sourcePaths = new WeakMap<ts.SourceFile, string>();
+    const declarationTable = (sf: ts.SourceFile) => {
+      let path = sourcePaths.get(sf);
+      if (path === undefined) {
+        path = resolve(sf.fileName);
+        sourcePaths.set(sf, path);
+      }
+      let table = declarations.get(path);
+      if (table === undefined) {
+        table = new Map<number, CodeSymbol>();
+        declarations.set(path, table);
+      }
+      return table;
+    };
+    const getDeclaration = (node: ts.Node) => {
+      const sf = node.getSourceFile();
+      return declarationTable(sf).get(node.getStart(sf));
+    };
+    const setDeclaration = (node: ts.Node, symbol: CodeSymbol) => {
+      const sf = node.getSourceFile();
+      declarationTable(sf).set(node.getStart(sf), symbol);
+    };
     const owners = new WeakMap<ts.Node, CodeSymbol>();
     // Keep declaration identity by path/offset, not by retaining every compiler
     // program. Semantic analysis creates one program at a time after the
@@ -41,7 +85,9 @@ export class TypeScriptPlugin implements LanguagePlugin {
       parent?: CodeSymbol,
     ): CodeSymbol => {
       const sf = node.getSourceFile();
-      const start = sf.getLineAndCharacterOfPosition(node.getStart());
+      const offset = node.getStart(sf);
+      const text = sf.text.slice(offset, node.getEnd());
+      const start = sf.getLineAndCharacterOfPosition(offset);
       const end = sf.getLineAndCharacterOfPosition(node.getEnd());
       const blocks: string[] = [];
       let ancestor = node.parent;
@@ -78,7 +124,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
         startColumn: start.character + 1,
         endLine: end.line + 1,
         endColumn: end.character + 1,
-        signature: node.getText().slice(0, 500).split(/\r?\n/, 1)[0] ?? "",
+        signature: text.slice(0, 500).split(/\r?\n/, 1)[0] ?? "",
         exported:
           (!!node.parent && ts.isExportAssignment(node.parent)) ||
           !!mods?.some(
@@ -92,7 +138,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
           : mods?.some((m) => m.kind === ts.SyntaxKind.ProtectedKeyword)
             ? "protected"
             : "public",
-        contentHash: hash(node.getText()),
+        contentHash: hash(text),
         metadata: {
           parentId: parent?.id,
           tsconfig: parent?.metadata.tsconfig,
@@ -108,13 +154,13 @@ export class TypeScriptPlugin implements LanguagePlugin {
         existing.endLine = Math.max(existing.endLine, sym.endLine);
         existing.endColumn = sym.endColumn;
         existing.contentHash = hash(existing.contentHash + sym.contentHash);
-        declarations.set(key(node), existing);
+        setDeclaration(node, existing);
         owners.set(node, existing);
         return existing;
       }
       result.symbols.push(sym);
       symbolIds.set(sym.id, sym);
-      declarations.set(key(node), sym);
+      setDeclaration(node, sym);
       owners.set(node, sym);
       if (parent) addEdge(parent, sym, "DECLARES", sym.startLine, "AST_CONFIRMED");
       if (sym.exported && parent) addEdge(parent, sym, "EXPORTS", sym.startLine, "AST_CONFIRMED");
@@ -138,7 +184,35 @@ export class TypeScriptPlugin implements LanguagePlugin {
         line,
       });
     };
+    // Most syntax nodes cannot declare a graph symbol. Avoid text extraction
+    // and the declaration-specific checks for those nodes on both passes.
+    const declarationKinds = new Set<ts.SyntaxKind>([
+      ts.SyntaxKind.ImportSpecifier,
+      ts.SyntaxKind.NamespaceImport,
+      ts.SyntaxKind.ImportClause,
+      ts.SyntaxKind.ExportSpecifier,
+      ts.SyntaxKind.FunctionDeclaration,
+      ts.SyntaxKind.FunctionExpression,
+      ts.SyntaxKind.ArrowFunction,
+      ts.SyntaxKind.ClassDeclaration,
+      ts.SyntaxKind.ClassExpression,
+      ts.SyntaxKind.InterfaceDeclaration,
+      ts.SyntaxKind.TypeAliasDeclaration,
+      ts.SyntaxKind.EnumDeclaration,
+      ts.SyntaxKind.Constructor,
+      ts.SyntaxKind.MethodDeclaration,
+      ts.SyntaxKind.MethodSignature,
+      ts.SyntaxKind.GetAccessor,
+      ts.SyntaxKind.SetAccessor,
+      ts.SyntaxKind.PropertyDeclaration,
+      ts.SyntaxKind.PropertySignature,
+      ts.SyntaxKind.PropertyAssignment,
+      ts.SyntaxKind.VariableDeclaration,
+      ts.SyntaxKind.BindingElement,
+      ts.SyntaxKind.ModuleDeclaration,
+    ]);
     const classify = (node: ts.Node): { kind: SymbolKind; name: string } | undefined => {
+      if (!declarationKinds.has(node.kind)) return;
       const named = node as ts.NamedDeclaration;
       const name = named.name?.getText();
       if (
@@ -212,6 +286,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
       if (ts.isModuleDeclaration(node)) return { kind: "MODULE", name: node.name.getText() };
       return;
     };
+    const declarationStart = clock();
     for (const { sf, path, file, config } of workspace.sources()) {
       this.observe(path);
       const root = addSymbol(sf, file, "FILE", file.path);
@@ -230,7 +305,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
           (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
         ) {
           owners.set(node.initializer, owner);
-          declarations.set(key(node.initializer), owner);
+          setDeclaration(node.initializer, owner);
           owner.async = !!ts
             .getModifiers(node.initializer)
             ?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
@@ -239,8 +314,19 @@ export class TypeScriptPlugin implements LanguagePlugin {
       };
       ts.forEachChild(sf, (n) => visit(n, root));
     }
-    for (const { program, roots } of workspace.programs()) {
+    this.profile?.({
+      phase: "DECLARATIONS",
+      durationMs: clock() - declarationStart,
+      symbols: result.symbols.length,
+    });
+    for (const { program, roots } of workspace.programs(
+      this.profile
+        ? (durationMs, files) => this.profile?.({ phase: "PROGRAM", durationMs, files })
+        : undefined,
+    )) {
+      const checkerStart = clock();
       const checker = program.getTypeChecker();
+      this.profile?.({ phase: "CHECKER", durationMs: clock() - checkerStart, files: roots.length });
       const unshadowed = (node: ts.Identifier) =>
         !checker.getSymbolAtLocation(node)?.declarations?.some((d) => {
           const name = (d as ts.NamedDeclaration).name;
@@ -285,7 +371,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
           if (accessors.length) candidates = accessors;
         }
         for (const d of candidates) {
-          const found = declarations.get(key(d));
+          const found = getDeclaration(d);
           if (found) return found;
         }
         return;
@@ -294,26 +380,30 @@ export class TypeScriptPlugin implements LanguagePlugin {
         const sf = program.getSourceFile(path),
           root = fileSymbols.get(path);
         if (!sf || !root) continue;
+        const fileStart = clock();
         for (const d of program.getSyntacticDiagnostics(sf))
           result.diagnostics.push({
             file: root.file,
             message: ts.flattenDiagnosticMessageText(d.messageText, " ").slice(0, 2000),
           });
+        const lineOf = (node: ts.Node) =>
+          sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
         const unresolved = (node: ts.Node, owner: CodeSymbol, type: string) => {
-          const line = sf.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+          const offset = node.getStart(sf);
+          const line = sf.getLineAndCharacterOfPosition(offset).line + 1;
           result.unresolved.push({
-            id: id(owner.id, type, String(node.getStart()), String(node.getEnd())),
+            id: id(owner.id, type, String(offset), String(node.getEnd())),
             source: owner.id,
             fileId: owner.fileId,
             line,
-            expression: node.getText().slice(0, 300),
+            expression: sf.text.slice(offset, Math.min(node.getEnd(), offset + 300)),
             reason: "Dynamic, external, excluded, or not statically resolved within project scope",
             type,
           });
         };
         const visit = (node: ts.Node, parent: CodeSymbol, caller: CodeSymbol) => {
           const owner =
-            (classify(node) || ts.isFunctionLike(node) ? declarations.get(key(node)) : undefined) ??
+            (classify(node) || ts.isFunctionLike(node) ? getDeclaration(node) : undefined) ??
             parent;
           // Declaration containment and execution ownership are different: a local
           // initializer runs in its surrounding function, not in its variable.
@@ -321,7 +411,6 @@ export class TypeScriptPlugin implements LanguagePlugin {
             ts.isFunctionLike(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node)
               ? owner
               : caller;
-          const line = sf.getLineAndCharacterOfPosition(node.getStart()).line + 1;
           if (
             ts.isCallExpression(node) &&
             (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
@@ -336,18 +425,18 @@ export class TypeScriptPlugin implements LanguagePlugin {
                 : undefined;
             const sourceFile = symbol?.declarations?.find(ts.isSourceFile);
             const target = sourceFile ? fileSymbols.get(resolve(sourceFile.fileName)) : undefined;
-            if (target) addEdge(owner, target, "IMPORTS", line, "SEMANTIC_CONFIRMED");
+            if (target) addEdge(owner, target, "IMPORTS", lineOf(node), "SEMANTIC_CONFIRMED");
             else unresolved(node, owner, "IMPORTS");
           } else if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
             let target: CodeSymbol | undefined;
             const signature = checker.getResolvedSignature(node);
-            if (signature?.declaration) target = declarations.get(key(signature.declaration));
+            if (signature?.declaration) target = getDeclaration(signature.declaration);
             target ??= targetOf(
               ts.isPropertyAccessExpression(node.expression)
                 ? node.expression.name
                 : node.expression,
             );
-            if (target) addEdge(callOwner, target, "CALLS", line, "SEMANTIC_CONFIRMED");
+            if (target) addEdge(callOwner, target, "CALLS", lineOf(node), "SEMANTIC_CONFIRMED");
             else unresolved(node, callOwner, "CALLS");
           }
           if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
@@ -361,7 +450,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
                   root,
                   target,
                   ts.isImportDeclaration(node) ? "IMPORTS" : "RE_EXPORTS",
-                  line,
+                  lineOf(node),
                   "SEMANTIC_CONFIRMED",
                 );
               else unresolved(node, root, "IMPORTS");
@@ -372,19 +461,19 @@ export class TypeScriptPlugin implements LanguagePlugin {
             node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
             commonJsExport(node.left)
           ) {
-            const target = declarations.get(key(node.right)) ?? targetOf(node.right);
+            const target = getDeclaration(node.right) ?? targetOf(node.right);
             if (target) {
               target.exported = true;
-              addEdge(root, target, "EXPORTS", line, "AST_CONFIRMED");
+              addEdge(root, target, "EXPORTS", lineOf(node), "AST_CONFIRMED");
             } else unresolved(node, root, "EXPORTS");
           }
           if (ts.isExportSpecifier(node)) {
             const target = targetOf(node.name);
-            if (target) addEdge(root, target, "EXPORTS", line, "SEMANTIC_CONFIRMED");
+            if (target) addEdge(root, target, "EXPORTS", lineOf(node), "SEMANTIC_CONFIRMED");
           }
           if (ts.isExportAssignment(node)) {
             const target = targetOf(node.expression);
-            if (target) addEdge(root, target, "EXPORTS", line, "SEMANTIC_CONFIRMED");
+            if (target) addEdge(root, target, "EXPORTS", lineOf(node), "SEMANTIC_CONFIRMED");
           }
           if (ts.isHeritageClause(node))
             for (const type of node.types) {
@@ -394,7 +483,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
                   owner,
                   target,
                   node.token === ts.SyntaxKind.ExtendsKeyword ? "EXTENDS" : "IMPLEMENTS",
-                  line,
+                  lineOf(node),
                   "SEMANTIC_CONFIRMED",
                 );
               else unresolved(type, owner, "HERITAGE");
@@ -405,14 +494,37 @@ export class TypeScriptPlugin implements LanguagePlugin {
               (node.parent as ts.NamedDeclaration).name === node;
             const target = isDeclaration ? undefined : targetOf(node);
             if (target && target.id !== owner.id)
-              addEdge(owner, target, "REFERENCES", line, "SEMANTIC_CONFIRMED");
+              addEdge(owner, target, "REFERENCES", lineOf(node), "SEMANTIC_CONFIRMED");
           }
           ts.forEachChild(node, (n) => visit(n, owner, callOwner));
         };
         ts.forEachChild(sf, (n) => visit(n, root, root));
+        this.profile?.({
+          phase: "SEMANTIC_FILE",
+          durationMs: clock() - fileStart,
+          file: root.file,
+          edges: result.edges.length,
+          unresolved: result.unresolved.length,
+        });
       }
     }
-    result.edges = [...new Map(result.edges.map((e) => [e.id, e])).values()];
+    const dedupStart = clock();
+    const edges = new Map<string, Analysis["edges"][number]>();
+    for (const edge of result.edges) edges.set(edge.id, edge);
+    result.edges = [...edges.values()];
+    this.profile?.({
+      phase: "DEDUPLICATION",
+      durationMs: clock() - dedupStart,
+      edges: result.edges.length,
+    });
+    this.profile?.({
+      phase: "COMPLETE",
+      durationMs: clock() - begun,
+      files: files.length,
+      symbols: result.symbols.length,
+      edges: result.edges.length,
+      unresolved: result.unresolved.length,
+    });
     return result;
   }
 }

@@ -94,3 +94,25 @@ release keeps the default deadline unchanged. The validated `parserTimeoutMs`
 project option allows 1000–600000 ms. For an offline probe, override it without
 writing the selected project: `bun run verify:parser /absolute/project 300000`.
 A longer budget is not a parser speed improvement.
+
+## Locating parser costs
+
+`bun run profile:parser /absolute/project` reports newline-delimited JSON for
+scanner, workspace, declarations, compiler program creation, checker preparation,
+per-file semantic analysis, deduplication and total analysis time. The optional
+second argument stops after that many semantic files, for example:
+
+```sh
+bun run profile:parser /absolute/project 1000 > /tmp/parser-profile.jsonl
+```
+
+A `STOPPED` record explicitly means incomplete analysis. The limit is a file
+budget, not a time or memory bound; discovery/declarations/program creation still
+precede it. This diagnostic runs in-process and does not publish an index, access
+PostgreSQL or execute the selected project's code. Use `verify:parser` for the
+isolated worker's deadline and output-cap acceptance instead. Profiles include
+relative filenames; keep raw private-project profiles local. `heapUsedBytes` is
+a sampled JS heap metric, not total or peak process memory.
+
+The profiling callback is optional. Normal parsing does not emit profiles or
+sample the clock per AST node. Tests compare profiling and non-profiling graphs.

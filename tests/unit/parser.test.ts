@@ -150,3 +150,25 @@ it("regression-005: calls belong to execution scopes, including local initialize
   const unresolved = a.unresolved.find((u) => u.expression === "externalCall()")!;
   expect(byId.get(unresolved.source)?.name).toBe("enclosing");
 });
+it("optional profiling preserves the complete graph and reports finite stage durations", async () => {
+  const c = await createProjectContext(resolve("tests/fixtures/typescript/core"));
+  const scan = await new RepositoryScanner().scan(c);
+  const phases: string[] = [];
+  const a = await new TypeScriptPlugin(undefined, (event) => {
+    expect(Number.isFinite(event.durationMs) && event.durationMs >= 0).toBe(true);
+    phases.push(event.phase);
+  }).analyze(c, scan.files, scan.configs);
+  const baseline = await new TypeScriptPlugin().analyze(c, scan.files, scan.configs);
+  expect(a).toEqual(baseline);
+  for (const phase of [
+    "WORKSPACE",
+    "DECLARATIONS",
+    "PROGRAM",
+    "CHECKER",
+    "SEMANTIC_FILE",
+    "DEDUPLICATION",
+    "COMPLETE",
+  ])
+    expect(phases).toContain(phase);
+  expect(phases.filter((p) => p === "SEMANTIC_FILE")).toHaveLength(scan.files.length);
+});

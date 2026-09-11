@@ -1,6 +1,6 @@
 # Implementation status
 
-Release: **0.1.0-alpha.6**. The supplied specifications are preserved under `docs/specifications/`; the project-isolation amendment takes precedence. This tracker distinguishes the implemented usable foundation from remaining release hardening. The alpha prerelease does not close the remaining production release gates.
+Release: **0.1.0-alpha.7**. The supplied specifications are preserved under `docs/specifications/`; the project-isolation amendment takes precedence. This tracker distinguishes the implemented usable foundation from remaining release hardening. The alpha prerelease does not close the remaining production release gates.
 
 | Phase | Status | Implementation and evidence |
 | --- | --- | --- |
@@ -13,14 +13,14 @@ Release: **0.1.0-alpha.6**. The supplied specifications are preserved under `doc
 | 6 Memory | DONE | SQL-paged type/tag/scope search, canonical scope validation, atomic symbol checks, concurrent supersede and retained history; CLI/MCP acceptance tests |
 | 7 CLI | DONE | init/add/index/status/doctor/search/symbol/callers/callees/references/remember/memories/mcp/watch/clean/remove/debug |
 | 8 MCP | DONE | Official SDK v2, 12 strict tools, readiness errors, bounded outputs, parser subprocess, no model-selected repository IDs |
-| 9 Hardening | IN PROGRESS | Read-failure retry, durable stages, interrupted owner detection, active DB disconnect/SIGKILL recovery and compact manifests verified; call-owner regressions, isolated worker failure diagnostics and offline acceptance verified; full large-file compiler performance remains open |
+| 9 Hardening | IN PROGRESS | Read-failure retry, durable stages, interrupted owner detection, active DB disconnect/SIGKILL recovery and compact manifests verified; call-owner regressions, isolated worker failure diagnostics and offline acceptance verified; phase profiling and allocation reductions added; full large-file compiler performance remains open |
 | 10 Documentation/release | IN PROGRESS | README, ADRs, guides, issue template, changelog, limitations; hosted Linux prerelease CI verified; stable-release hardening gates remain |
 
 ## Verification
 
 Local environment: macOS arm64, Bun 1.3.3, TypeScript Compiler API 6.0.3, MCP server/client 2.0.0, Docker PostgreSQL 17 with pgvector.
 
-Final verification results are recorded in `docs/verification.md`. Hosted Linux CI and the release workflow passed for v0.1.0-alpha.5; each subsequent release must pass its own gates.
+Final verification results are recorded in `docs/verification.md`. Hosted Linux CI and the release workflow passed for v0.1.0-alpha.6; each subsequent release must pass its own gates.
 
 ## Remaining work and next action
 

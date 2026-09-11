@@ -322,7 +322,7 @@ export class CompilerWorkspace {
       };
     }
   }
-  *programs() {
+  *programs(observe?: (durationMs: number, files: number) => void) {
     const groups = new Map<string, string[]>();
     for (const path of this.inputs.keys()) {
       const config = this.owner.get(path) ?? "";
@@ -406,7 +406,10 @@ export class CompilerWorkspace {
           }
           return resolution;
         });
-      yield { program: ts.createProgram({ rootNames: roots, options, host }), roots, config };
+      const started = observe ? performance.now() : 0;
+      const program = ts.createProgram({ rootNames: roots, options, host });
+      observe?.(performance.now() - started, roots.length);
+      yield { program, roots, config };
     }
   }
 }
