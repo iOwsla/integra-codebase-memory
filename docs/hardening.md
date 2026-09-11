@@ -132,3 +132,35 @@ hour.
 These tests use real filesystem watching and a disposable CodeMemory database.
 They are bounded correctness regressions, not a multi-hour soak test or memory
 leak acceptance. Long-duration operation and peak-memory measurements remain open.
+
+## Simulating this repository
+
+```sh
+bun run simulate:project       # 300 seconds of exercise, plus setup/final checks
+bun run simulate:project 3600  # request a one-hour exercise
+```
+
+This command accepts 10..86400 seconds and selects only the CodeMemory repository
+containing the script. It copies regular Git-tracked working-tree files into a
+temporary directory; untracked files, installed dependencies and existing local
+indexes are not copied. It needs the same disposable-database permission as the
+tests. No dependency installation or target-source execution occurs. Keep tracked
+files unchanged during the run: their content hashes are checked at the end.
+
+The production parser worker indexes the copy. Each round writes a probe function
+and checks its caller edge, stale function removal and all edge endpoints. Every
+fifth round injects an analysis failure and checks retained generation plus retry;
+every third closes the watcher, renames the probe to a non-source extension and
+restarts to verify removal. Project memory must remain accessible. After removing
+the probe, all baseline files, symbols, edges, unresolved records and diagnostics
+must match exactly, followed by a no-op index. JSON lines report progress and a
+`simulation_complete` record only after every assertion succeeds. Ordinary errors
+clean up the watcher, temporary directory and database through `finally`; forced
+process termination can prevent cleanup.
+
+RSS is sampled every 500 ms with `ps` on macOS/Linux, summing the parent and its
+descendants (including parser and sampling subprocesses). PostgreSQL is excluded;
+short peaks can be missed and shared pages can be counted more than once. Sampling
+errors are counted explicitly. This measurement does not establish a memory bound
+or the absence of leaks. The five-second pause between rounds limits compiler
+pressure; this is a paced simulation, not a saturation benchmark. See verification.md.

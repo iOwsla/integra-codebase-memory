@@ -151,3 +151,41 @@ restarts with offline edits, and an explicitly blocked analysis with a later
 queued write. See hardening.md for assertions and test boundaries. No runtime
 fix was required by these scenarios. Multi-hour soak testing, large-repository
 publication/query acceptance and peak-memory bounds remain unverified.
+
+## CodeMemory repository simulation (alpha.9)
+
+On 2026-09-11, the new simulation runner exercised a temporary copy of the tracked
+working-tree contents at commit `27c07270f8281f611d3bde33082fa9032970c7b3`.
+Platform: macOS 15.6.1 arm64, Bun 1.3.3, local PostgreSQL. The copy contained 127
+tracked files and indexed 62 source files, 3,068 symbols and 8,055 edges. The
+new untracked runner itself was outside this sample.
+
+`bun scripts/simulate-project.ts 300` exited successfully after 306.60 seconds,
+including initial publication and final restoration checks. It completed 28
+rounds, five injected-failure recoveries and nine watcher restarts. All original
+graph records matched after probe removal, the project memory record survived,
+and tracked source content hashes remained unchanged. Temporary resources were
+cleaned up on successful exit.
+
+| Observation | Value |
+| --- | ---: |
+| Initial index publication | 3.39 s |
+| Median change-to-verified-graph time | 3.02 s |
+| Maximum change-to-verified-graph time | 29.43 s |
+| Median SQL symbol search | 19.05 ms |
+| Maximum SQL symbol search | 560.17 ms |
+| Final no-op indexing | 50.11 ms |
+| Highest sampled parent + descendant RSS | 309.42 MiB |
+| RSS samples / sampling errors | 601 / 0 |
+
+Convergence includes polling, snapshot validation and injected-failure recovery,
+not just parser execution. Search queried `createProjectContext` with limit 10.
+These are observations from one paced run on the local device. Sampled RSS omits
+PostgreSQL, can miss peaks and can count shared pages multiple times. This closes
+a short real-codebase simulation check; multi-hour stability, total peak memory
+and large-monorepo acceptance remain open.
+
+Release checks: 79 tests across 13 files passed locally (38.08 seconds), along
+with lint, typecheck and build. A separate 10-second exercise of the final staged
+runner also restored the full baseline graph and completed successfully; this
+short invocation is included in CI.

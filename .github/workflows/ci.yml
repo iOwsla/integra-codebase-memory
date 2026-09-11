@@ -31,3 +31,4 @@ jobs:
       - run: bun dist/index.js --help
       - run: bun run verify:parser tests/fixtures/typescript/regression-005-call-owners
       - run: bun run profile:parser tests/fixtures/typescript/regression-005-call-owners 1
+      - run: bun run simulate:project 10

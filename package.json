@@ -1,6 +1,6 @@
 {
   "name": "integra-codebase-memory",
-  "version": "0.1.0-alpha.8",
+  "version": "0.1.0-alpha.9",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -21,7 +21,8 @@
     "db:status": "bun scripts/migrate.ts --status",
     "benchmark": "bun scripts/benchmark.ts",
     "verify:parser": "bun scripts/verify-parser.ts",
-    "profile:parser": "bun scripts/profile-parser.ts"
+    "profile:parser": "bun scripts/profile-parser.ts",
+    "simulate:project": "bun scripts/simulate-project.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.0.0",

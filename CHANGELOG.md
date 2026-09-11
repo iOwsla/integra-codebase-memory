@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha.9 — 2026-09-11
+
+### Added
+- `bun run simulate:project [seconds]` exercises a temporary copy of this repository with the production parser worker, disposable PostgreSQL index, watcher edits, injected failures and session restarts.
+- Full baseline graph restoration and project-memory retention assertions, plus sampled parent/descendant RSS and SQL search timings.
+- A five-minute local run completed 28 rounds, five recoveries and nine restarts. Original tracked source contents were unchanged.
+
+### Scope
+- Sampled RSS is not a peak-memory guarantee; the database is excluded. Long-duration and large-monorepo release gates remain open. Runtime indexing behavior is unchanged.
+
 ## 0.1.0-alpha.8 — 2026-09-11
 
 ### Added
