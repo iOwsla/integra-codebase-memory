@@ -84,7 +84,7 @@ export class RepositoryScanner implements FileScanner {
         if (!entry.isFile()) continue;
         if (entry.name.endsWith(".json")) jsonCandidates.set(path, rel);
         const config = /^(tsconfig.*\.json|jsconfig.*\.json|package\.json)$/.test(entry.name);
-        const source = /\.(?:[cm]?[jt]sx?)$/.test(entry.name);
+        const source = /\.(?:[cm]?[jt]sx?|prisma)$/.test(entry.name);
         if (!source && !config) continue;
         if (!config && !matchesInclude(rel)) {
           exclude("files", "NOT_INCLUDED");

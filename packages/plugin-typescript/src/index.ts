@@ -9,6 +9,8 @@ import type {
 } from "@codememory/core";
 import { hash, id } from "@codememory/shared";
 import ts from "typescript";
+import { PrismaCatalog } from "./prisma-schema";
+import { PrismaUsage } from "./prisma-usage";
 import { bodyFingerprint } from "./quality";
 import { CompilerWorkspace, configurationReferences } from "./workspace";
 
@@ -33,9 +35,9 @@ export interface ParserProfileEvent {
 /** Compiler input is an in-memory allowlist produced by the bounded scanner. */
 export class TypeScriptPlugin implements LanguagePlugin {
   readonly id = "typescript";
-  readonly version = `6:${ts.version}`;
+  readonly version = `7:prisma1:${ts.version}`;
   readonly configurationReferences = configurationReferences;
-  readonly extensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
+  readonly extensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts", ".prisma"];
   constructor(
     private readonly observe: (path: string) => void = () => {},
     protected readonly profile?: (event: ParserProfileEvent) => void,
@@ -49,7 +51,13 @@ export class TypeScriptPlugin implements LanguagePlugin {
     const begun = clock();
     let completedFiles = 0;
     const result: Analysis = { symbols: [], edges: [], unresolved: [], diagnostics: [] };
-    const workspace = new CompilerWorkspace(context, files, configs, result.diagnostics);
+    const prisma = new PrismaCatalog(context, files, configs, result);
+    const workspace = new CompilerWorkspace(
+      context,
+      files.filter((f) => !f.path.endsWith(".prisma")),
+      configs,
+      result.diagnostics,
+    );
     this.profile?.({ phase: "WORKSPACE", durationMs: clock() - begun, files: files.length });
     const symbolIds = new Map<string, CodeSymbol>();
     const declarations = new Map<string, Map<number, CodeSymbol>>();
@@ -331,6 +339,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
     )) {
       const checkerStart = clock();
       const checker = program.getTypeChecker();
+      const prismaUsage = prisma.groups.length ? new PrismaUsage(prisma, checker) : undefined;
       this.profile?.({ phase: "CHECKER", durationMs: clock() - checkerStart, files: roots.length });
       const unshadowed = (node: ts.Identifier) =>
         !checker.getSymbolAtLocation(node)?.declarations?.some((d) => {
@@ -438,6 +447,8 @@ export class TypeScriptPlugin implements LanguagePlugin {
             const target = sourceFile ? fileSymbols.get(resolve(sourceFile.fileName)) : undefined;
             if (target) addEdge(owner, target, "IMPORTS", lineOf(node), "SEMANTIC_CONFIRMED");
             else unresolved(node, owner, "IMPORTS");
+          } else if (ts.isCallExpression(node) && prismaUsage?.call(node, callOwner)) {
+            // Prisma query edges carry the model, operation and exact call location.
           } else if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
             let target: CodeSymbol | undefined;
             const signature = checker.getResolvedSignature(node);

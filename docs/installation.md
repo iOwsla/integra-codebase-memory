@@ -84,8 +84,9 @@ Intentional exclusions alone do not make the graph incomplete. Old generations
 report `exclusions.available: false` until rebuilt; missing legacy locations are
 not reconstructed. Parser revision 6 triggers that rebuild on the next index.
 
-Only JavaScript/TypeScript source extensions listed in `analysisScope` are analyzed.
-Kotlin and Prisma are unsupported; `NOT_FOUND` from their source queries is not
+JavaScript/TypeScript and Prisma source extensions listed in `analysisScope` are analyzed.
+See [Prisma coverage](prisma.md) for model relations and delegate usage resolution.
+Kotlin remains unsupported; `NOT_FOUND` from their source queries is not
 evidence of absence on disk. JSON project metadata may aid module resolution but
 does not receive a source-language graph. `unresolvedReferences` counts recorded
 unresolved usages; zero is not proof that every dynamic call is understood.

@@ -79,9 +79,9 @@ export class CodebaseService {
       ...status,
       runtime: { ...runtimeInfo(), sessionId: this.context.sessionId },
       analysisScope: {
-        languages: ["JavaScript", "TypeScript"],
-        extensions: [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"],
-        unsupportedExamples: ["Kotlin", "Prisma"],
+        languages: ["JavaScript", "TypeScript", "Prisma"],
+        extensions: [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".prisma"],
+        unsupportedExamples: ["Kotlin"],
         include: this.context.effectiveConfig.include,
         exclude: this.context.effectiveConfig.exclude,
         excludeGenerated: this.context.effectiveConfig.excludeGenerated,

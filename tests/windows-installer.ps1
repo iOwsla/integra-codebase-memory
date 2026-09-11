@@ -67,7 +67,7 @@ try {
 
     if ($env:TEST_PUBLISHED_BOOTSTRAP -eq 'true') {
         $downloadedScript = Join-Path $temporary 'downloaded-bootstrap.ps1'
-        Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.18/bootstrap.ps1' -OutFile $downloadedScript
+        Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.19/bootstrap.ps1' -OutFile $downloadedScript
         $liveProject = Join-Path $temporary 'downloaded target'
         [void][IO.Directory]::CreateDirectory($liveProject)
         $liveRuntime = Join-Path $temporary 'downloaded runtime'
@@ -93,7 +93,7 @@ try {
             [void][IO.Directory]::CreateDirectory((Join-Path $destination '.git'))
             Set-Content -LiteralPath (Join-Path $destination 'install.ps1') -Value 'param($Project, $Client, [switch]$Write, [switch]$WithServices) if (-not $Write) { throw "Missing write" }; Set-Content -LiteralPath (Join-Path $PSScriptRoot "received.txt") -Value "$Project|$Client"'
         } elseif ($args[2] -eq 'remote') { 'https://github.com/iOwsla/integra-codebase-memory.git' }
-        elseif ($args[2] -eq 'describe') { 'v0.1.0-alpha.18' }
+        elseif ($args[2] -eq 'describe') { 'v0.1.0-alpha.19' }
     }
     function bun {
         $global:LASTEXITCODE = 0

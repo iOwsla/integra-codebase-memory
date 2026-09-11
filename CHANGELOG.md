@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.19 — 2026-09-12
+
+- Index in-scope Prisma schemas into located models, fields, enums, named relations and composite foreign-key edges. Preserve mapping and referential-action metadata; report syntax and unresolved schema diagnostics.
+- Resolve Prisma model queries through proven client/delegate provenance, including renamed clients, constant aliases, destructuring, local imports, extracted methods, typed delegates and transaction parameters. Variable names alone never establish Prisma usage.
+- Expose calling files, lines and query operations through existing model references, plus field references for literal query arguments. Keep independent/ambiguous schema clients isolated and document dynamic-resolution limits.
+- Reuse existing PostgreSQL relationship indexes; verify the selective model-usage query plan over 10,000 edges. Add native parser, worker, pagination and source-replacement regressions. No database migration is needed; reconnect/reindex the selected project after updating to parser revision 7.
+
 ## 0.1.0-alpha.18 — 2026-09-12
 
 - Fix `update --version <release>` being intercepted by the root CLI version flag. Keep ordinary `codememory --version` behavior and allow the selected published release to reach the updater.

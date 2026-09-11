@@ -1,6 +1,6 @@
 # Implementation status
 
-Release: **0.1.0-alpha.18**. The supplied specifications are preserved under `docs/specifications/`; the project-isolation amendment takes precedence. This tracker distinguishes the implemented usable foundation from remaining release hardening. The alpha prerelease does not close the remaining production release gates.
+Release: **0.1.0-alpha.19**. The supplied specifications are preserved under `docs/specifications/`; the project-isolation amendment takes precedence. This tracker distinguishes the implemented usable foundation from remaining release hardening. The alpha prerelease does not close the remaining production release gates.
 
 | Phase | Status | Implementation and evidence |
 | --- | --- | --- |
@@ -46,3 +46,10 @@ processes/settings and requires clients to reconnect. PostgreSQL non-owner unloc
 warnings and rapid retry loops are addressed. Known stale generations are marked
 incomplete. Full graph-resolution/Prisma follow-up is tracked in [field feedback](field-feedback.md);
 it is not covered by these runtime changes.
+
+### Alpha.19 Prisma coverage
+
+Located schema declarations, relations, compound foreign keys and proven model
+query usages are implemented with a pinned syntax parser and the existing hermetic
+TypeScript checker. Model aliases do not depend on client variable names.
+See [Prisma coverage](prisma.md) for supported bindings, query APIs and limits.

@@ -1,6 +1,6 @@
 {
   "name": "@codememory/plugin-typescript",
-  "version": "0.1.0-alpha.18",
+  "version": "0.1.0-alpha.19",
   "private": true,
   "type": "module",
   "exports": {
@@ -10,7 +10,8 @@
   "dependencies": {
     "@codememory/core": "workspace:*",
     "@codememory/shared": "workspace:*",
-    "typescript": "6.0.3",
-    "picomatch": "^4.0.7"
+    "@loancrate/prisma-schema-parser": "3.0.0",
+    "picomatch": "^4.0.7",
+    "typescript": "6.0.3"
   }
 }

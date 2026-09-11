@@ -328,3 +328,25 @@ access and verifies that ordinary shared-launcher `--version` still works.
 Local lint, typecheck and build passed, followed by five targeted tests in three
 files covering upgrade activation, management state and runtime diagnostics.
 The hosted full suite and all native platform gates must pass for this release.
+
+## Alpha.19 Prisma schema and usage graph (2026-09-12)
+
+Local lint, typecheck, frozen dependency installation and CLI build passed. The
+full suite passed 155 tests in 28 files. Twelve Prisma checks cover located
+models/fields, mappings, named relations, composite keys, enums, multifile groups,
+independent clients, package boundaries, syntax failures, renamed clients,
+constant/delegate aliases, ESM imports, CommonJS imports with shadowing protection,
+extracted methods, typed delegates, transaction callbacks and isolated worker
+transport. Negative cases avoid inferring Prisma from names or mutable aliases.
+
+Disposable PostgreSQL acceptance verifies model lookup, operation metadata,
+complete usage pagination and replacement after source deletion/renaming. Broken
+schema syntax makes coverage incomplete and removes obsolete model symbols. An
+`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` check with 10,000 relationships confirms
+the selective usage query uses an existing incoming-edge index. No new migration
+or duplicate index is introduced. This fixture does not establish production
+latency or complete large-monorepo coverage.
+
+Native Windows and macOS CI run the Prisma parser/worker cases as release gates;
+Linux runs the full suite. Runtime factories, dynamic arguments, raw SQL and
+nonstandard client mappings remain limited as described in [Prisma coverage](prisma.md).

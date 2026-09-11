@@ -1,5 +1,7 @@
 export type SymbolKind =
   | "FILE"
+  | "MODEL"
+  | "FIELD"
   | "MODULE"
   | "FUNCTION"
   | "METHOD"
@@ -64,6 +66,7 @@ export interface CodeSymbol {
   metadata: Record<string, unknown>;
 }
 export interface SymbolEdge {
+  metadata?: Record<string, unknown>;
   id: string;
   source: string;
   target: string;

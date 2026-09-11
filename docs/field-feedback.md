@@ -12,7 +12,7 @@ minimal local regression before implementation claims.
 | F-04 Full reanalysis and BUSY as ERROR | Alpha.17 separates contention and backs off retries. Bounded semantic incremental analysis remains open. |
 | F-05 Opaque trace nodes | Plan compact node identity/location metadata; traversal continuation needs a generation-aware contract. Open. |
 | F-06 Duplicate report matches one body twice | Reproduce multiple declarations sharing one source body; canonicalize before group counts, preserving distinct same-line functions. Open. |
-| F-07 Prisma/schema coverage | Design a schema plugin and link resolved client usages to models/fields; text-only coverage is not semantic coverage. Open. |
+| F-07 Prisma/schema coverage | Alpha.19 indexes schema relations and proven client/delegate usages, with field references for literal arguments. Dynamic factories, extensions and nonstandard client mappings remain open. See [coverage](prisma.md). |
 | F-08 JSX/shorthand references | Add fixtures for JSX elements, callbacks and shorthand properties before changing dead-code candidates. Open. |
 | F-09 Trigram noise | Evaluate explicit exact/min-score search controls. Open. |
 | F-10 Verbose symbols/outlines | Plan compact response projections and top-level outline controls with stable pagination. Open. |
@@ -29,4 +29,4 @@ matching a common property name alone is insufficient.
 Trace model-to-model relations and model-to-code consumers separately. Generated
 types, aliases, injected clients, extensions, raw SQL and dynamic model/field names
 need explicit unresolved evidence. Do not present text matches as confirmed Prisma
-relations. Prisma support is not implemented in alpha.17.
+relations. Alpha.19 implements the bounded subset documented in [Prisma coverage](prisma.md); the broader dynamic-resolution requirements remain open.
