@@ -56,7 +56,8 @@ const toolDescriptions: Record<keyof typeof schemas, string> = {
   get_symbol:
     "Read an indexed declaration preview and metadata. Check snippetTruncated and returned lines; follow continuation to inspect the full symbol.",
   get_file_outline: "List declarations in a selected-project file with pagination.",
-  get_file_context: "Read a bounded source window. Check snippetTruncated, returnedEndLinePartial and continuation; use local source for oversized individual lines.",
+  get_file_context:
+    "Read a bounded source window. Check snippetTruncated, returnedEndLinePartial and continuation; use local source for oversized individual lines.",
   find_references:
     "Find incoming static symbol references, including uses beyond direct calls. Missing references do not prove unused code.",
   find_callers:
