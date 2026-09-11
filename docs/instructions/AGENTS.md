@@ -89,10 +89,3 @@ pagination state, source checks and unresolved limits. Do not assume another
 agent has MCP access or inherits this context. An agent without access must use
 the supplied evidence and targeted source reads, and disclose that limitation.
 <!-- integra-code-memory:end -->
-
-## Repository development
-
-Run lint and typecheck plus tests appropriate to the change. Database tests use
-fresh disposable databases. Keep private repository data, local absolute paths,
-credentials and raw private profiles out of this public repository. Never rewrite
-published release tags. Do not mark release gates complete without recorded evidence.

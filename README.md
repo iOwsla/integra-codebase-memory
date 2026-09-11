@@ -36,12 +36,18 @@ Only MCP requires an explicit absolute `--project`. CLI indexing accepts a posit
 
 ## MCP client configuration
 
+Start with the [shared setup guide](docs/setup/common.md), then follow
+[Codex](docs/setup/codex.md) or [Claude Code](docs/setup/claude-code.md).
+Ready-to-copy rules: [AGENTS.md](docs/instructions/AGENTS.md) and
+[CLAUDE.md](docs/instructions/CLAUDE.md).
+
+
 Use your client's STDIO configuration, with absolute paths:
 
 ```json
 {
   "mcpServers": {
-    "codememory": {
+    "integra_code_memory": {
       "command": "/absolute/path/to/bun",
       "args": [
         "/absolute/path/to/integra-codebase-memory/apps/cli/src/index.ts",

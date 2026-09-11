@@ -6,7 +6,7 @@ The official v2 SDK uses `serveStdio` and Standard Schema/Zod v4. Start:
 bun /absolute/path/to/apps/cli/src/index.ts mcp --project /absolute/source/root --auto-index --watch
 ```
 
-The README contains a generic JSON STDIO configuration for clients such as Claude Code. For Codex, configure a STDIO MCP entry with the same executable and args in the client's MCP settings. Client configuration files are deliberately not modified by this repository.
+Follow the [shared prerequisites](setup/common.md), then the [Codex guide](setup/codex.md) or [Claude Code guide](setup/claude-code.md). Copy-ready instructions are provided for both clients. Codex configuration is written only by the explicit `connect:codex --write` command; existing differing settings are preserved.
 
 Tools: codebase_status, search_symbols, search_code, get_symbol, get_file_outline, get_file_context, find_references, find_callers, find_callees, trace_dependencies, remember, search_memory.
 
