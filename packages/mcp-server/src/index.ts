@@ -54,9 +54,9 @@ const toolDescriptions: Record<keyof typeof schemas, string> = {
   search_code:
     "Search indexed source text for literals and existing implementations. Follow result pages and inspect source before claiming duplication.",
   get_symbol:
-    "Read the exact indexed declaration, location and metadata for a symbol ID or unambiguous name.",
+    "Read an indexed declaration preview and metadata. Check snippetTruncated and returned lines; follow continuation to inspect the full symbol.",
   get_file_outline: "List declarations in a selected-project file with pagination.",
-  get_file_context: "Read a bounded source window around a line in a selected-project file.",
+  get_file_context: "Read a bounded source window. Check snippetTruncated, returnedEndLinePartial and continuation; use local source for oversized individual lines.",
   find_references:
     "Find incoming static symbol references, including uses beyond direct calls. Missing references do not prove unused code.",
   find_callers:

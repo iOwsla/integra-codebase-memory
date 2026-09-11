@@ -15,11 +15,18 @@ If indexing is pending, allow it to settle before making current-code claims.
 `INDEX_NOT_READY` and tool errors are not empty search results. `LAST_COMPLETED`
 means the latest published generation, not proof every source has been analyzed.
 
+Inspect `diagnosticSummary`, `incompleteReasons`, `exclusions` and
+`analysisScope` when present. Page `last_run.diagnostics` using
+`diagnosticLimit` / `diagnosticOffset`; `fileErrors: []` does not mean no syntax
+errors. `READY` is compatible with incomplete coverage. Check `runtime.version`
+after upgrades; an old client process needs reconnecting. `lastIndexJob.owner`
+identifies an index writer, not permission to terminate a process.
+
 ## Tool priority
 
 1. `codebase_status` — scope, readiness and recorded index problems.
 2. `search_symbols` — locate declarations; use returned IDs to disambiguate names.
-3. `get_symbol` — inspect exact declaration source and location.
+3. `get_symbol` — inspect an indexed declaration preview and its location.
 4. `find_callers`, `find_callees`, `find_references` — incoming calls, outgoing calls
    and other static uses. Check both directions when assessing a change.
 5. `trace_dependencies` — indirect impact; select direction and edge types.
@@ -41,7 +48,14 @@ This server has no `search_graph`, `trace_path`, `get_code_snippet`,
   file tools, check source against the index, inspect both relationship directions
   and complete relevant pagination. Report excluded/unresolved areas explicitly.
 
-Follow `hasMore` / `nextOffset` where returned. A truncated traversal or response
+Check `snippetTruncated`, `returnedStartLine`, `returnedEndLine` and
+`returnedEndLinePartial` before treating a preview as the complete function.
+Follow `continuation` with `get_file_context` to the declared symbol end line;
+read local source if a single line exceeds the context limit. Response truncation
+is separate from index `incomplete` coverage.
+
+Follow `hasMore` / `nextOffset` where returned. If `pageSizeReduced` is true,
+use the returned next offset rather than adding your requested limit. A truncated traversal or response
 is partial evidence. Recheck status after material source edits or a long review;
 if the generation changed, repeat affected queries rather than combining pages
 from different generations. `incomplete: false` means no reported incompleteness,
