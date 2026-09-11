@@ -21,7 +21,8 @@ export class IndexService {
   async index(force = false): Promise<IndexResult> {
     return this.store.locked(this.context, async (store) => {
       const old = await store.snapshot(this.context);
-      const scan = await this.scanner.scan(this.context);
+      const scan = await this.scanner.scan(this.context, this.plugin.configurationReferences);
+      for (const file of scan.files) file.parserVersion = this.plugin.version;
       const fingerprint = hash(
         JSON.stringify([
           this.context.indexVersion,

@@ -80,3 +80,53 @@ it("regression-002: nested unresolved calls have distinct identities", async () 
   expect(a.unresolved.filter((u) => u.type === "CALLS")).toHaveLength(2);
   expect(new Set(a.unresolved.map((u) => u.id)).size).toBe(a.unresolved.length);
 });
+it("regression-003: exported values, binding elements, overload ranges and accessors retain structure", async () => {
+  const c = await createProjectContext(
+      resolve("tests/fixtures/typescript/regression-003-declarations"),
+    ),
+    s = await new RepositoryScanner().scan(c),
+    a = await new TypeScriptPlugin().analyze(c, s.files, s.configs);
+  for (const name of ["count", "current", "first", "renamed"])
+    expect(a.symbols.find((s) => s.name === name)?.exported, name).toBe(true);
+  expect(a.symbols.find((s) => s.name === "first")?.kind).toBe("CONSTANT");
+  const overload = a.symbols.find((s) => s.name === "overload");
+  expect(overload?.startLine).toBe(4);
+  expect(overload?.endLine).toBe(6);
+  expect(a.symbols.filter((s) => s.name === "value" && s.kind === "METHOD")).toHaveLength(2);
+  const target = a.symbols.find((s) => s.file === "target.ts" && s.kind === "FILE");
+  expect(a.edges.some((e) => e.type === "IMPORTS" && e.target === target?.id)).toBe(true);
+  expect(a.unresolved.some((u) => u.expression.startsWith("import("))).toBe(false);
+});
+it("regression-004: static CommonJS imports and exports retain their semantic targets", async () => {
+  const c = await createProjectContext(
+      resolve("tests/fixtures/typescript/regression-004-commonjs"),
+    ),
+    p = new TypeScriptPlugin(),
+    s = await new RepositoryScanner().scan(c),
+    a = await p.analyze(c, s.files, s.configs);
+  const entry = a.symbols.find((s) => s.name === "entry" && s.kind === "FUNCTION"),
+    answer = a.symbols.find((s) => s.name === "answer" && s.kind === "FUNCTION"),
+    file = a.symbols.find((s) => s.file === "target.cjs" && s.kind === "FILE");
+  expect(
+    a.edges.some((e) => e.type === "CALLS" && e.source === entry?.id && e.target === answer?.id),
+  ).toBe(true);
+  expect(a.edges.some((e) => e.type === "IMPORTS" && e.target === file?.id)).toBe(true);
+  expect(entry?.exported).toBe(true);
+  expect(answer?.exported).toBe(true);
+});
+it("property-access references distinguish getter reads from setter writes", async () => {
+  const c = await createProjectContext(
+      resolve("tests/fixtures/typescript/regression-003-declarations"),
+    ),
+    s = await new RepositoryScanner().scan(c),
+    a = await new TypeScriptPlugin().analyze(c, s.files, s.configs);
+  const source = a.symbols.find((s) => s.name === "access"),
+    get = a.symbols.find((s) => s.metadata.accessor === "get"),
+    set = a.symbols.find((s) => s.metadata.accessor === "set");
+  for (const target of [get, set])
+    expect(
+      a.edges.some(
+        (e) => e.type === "REFERENCES" && e.source === source?.id && e.target === target?.id,
+      ),
+    ).toBe(true);
+});

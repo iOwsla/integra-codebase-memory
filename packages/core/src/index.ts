@@ -142,7 +142,9 @@ export interface ProjectStore {
   diagnostics(): Promise<Record<string, unknown>>;
   close(): Promise<void>;
 }
+export type ConfigurationReferences = (path: string, text: string) => string[];
 export interface LanguagePlugin {
+  readonly configurationReferences?: ConfigurationReferences;
   readonly id: string;
   readonly version: string;
   readonly extensions: readonly string[];
@@ -165,6 +167,7 @@ export interface FileHasher {
 export interface FileScanner {
   scan(
     context: ProjectContext,
+    references?: ConfigurationReferences,
   ): Promise<{ files: IndexedFile[]; configs: Map<string, string>; excluded: number }>;
 }
 export interface GitProvider {

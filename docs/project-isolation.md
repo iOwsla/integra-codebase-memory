@@ -12,7 +12,7 @@ Missing or relative MCP roots fail with `PROJECT_ROOT_REQUIRED` before database 
 
 Scanner pruning, watcher pruning and file context containment exclude nested `.git` directories/files, submodules, default build directories, secrets and `.codememory`. The scanner honors inherited `.gitignore` rules and explicit include/exclude config. Watchers may monitor harmless in-scope non-source files so config and directory changes can trigger reconciliation, but never descend into ignored trees. All source symlinks are excluded, including internal symlinks.
 
-The parser reads only the scanned in-memory source/config map. Standard compiler libraries and npm metadata outside the selected root are not currently allowlisted. Dependencies outside the selected scope stay unresolved. Package-manager symlink workspaces require in-scope tsconfig paths until dedicated resolution support lands.
+The parser reads only the scanned in-memory source/config map. Standard compiler libraries and npm metadata outside the selected root are not currently allowlisted. Dependencies outside the selected scope stay unresolved. Declared in-scope package.json workspaces are mounted virtually for TypeScript resolution; physical package-manager symlinks are never followed. Referenced declaration outputs can redirect only to already-accepted sources. See parser.md.
 
 Containment uses `path.relative`, canonical roots and realpath validation rather than string prefixes. This is application-level isolation, **not an OS sandbox**. Concurrent hostile filesystem replacement and same-user access to the shared PostgreSQL database are outside this guarantee.
 

@@ -1,0 +1,4 @@
+{
+  // JSONC and trailing commas are valid in compiler configuration.
+  "compilerOptions":{"module":"NodeNext","moduleResolution":"NodeNext",},
+}

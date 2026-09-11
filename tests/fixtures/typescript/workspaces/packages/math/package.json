@@ -1,0 +1,1 @@
+{"name":"@demo/math","version":"1.0.0","type":"module","exports":{".":{"import":"./src/esm.mts","require":"./src/cjs.cts"},"./private":null,"./extra/*":"./src/*.ts"}}

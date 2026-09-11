@@ -1,6 +1,6 @@
 # Indexing
 
-Discovery prunes excluded trees before reading. Source files are bounded to 2 MiB by default, checked for NUL bytes, hashed with SHA-256 and tagged for generated code. The TypeScript plugin analyzes accepted files using a bounded compiler input map. Unresolved references are persisted separately.
+Discovery prunes excluded trees before reading. Source files are bounded to 2 MiB by default, checked for NUL bytes, hashed with SHA-256 and tagged for generated code. The TypeScript plugin analyzes accepted files using a bounded compiler input map, configured workspace mounts and in-scope reference redirects. See parser.md for configuration ownership and declaration-output mapping. Unresolved references are persisted separately.
 
 The index fingerprint combines parser version, schema compatibility, effective config and in-scope tsconfig/package/gitignore text. A no-op reopen skips all parser and graph writes. Otherwise the selected project is conservatively re-analyzed for dependency correctness. File changes and deletion cleanup publish atomically with graph data and an index-run record. Parser diagnostics are returned as incomplete coverage; fatal failures retain the previous graph.
 

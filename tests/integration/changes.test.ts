@@ -103,3 +103,32 @@ it("recovers when PostgreSQL disconnects an idle pooled connection", async () =>
     await db.dispose();
   }
 });
+it("re-resolves workspace consumers after only package exports metadata changes", async () => {
+  const db = await testDatabase(),
+    f = await fixture({
+      "package.json": '{"workspaces":["lib"]}',
+      "lib/package.json": '{"name":"lib","exports":"./old.ts"}',
+      "lib/old.ts": "export function api(){return 1}",
+      "lib/new.ts": "export function api(){return 2}",
+      "main.ts": "import {api} from 'lib';export function run(){return api()}",
+    });
+  try {
+    const c = await createProjectContext(f.root);
+    await db.store.register(c);
+    const index = new IndexService(c, db.store, new RepositoryScanner(), new TypeScriptPlugin());
+    await index.index();
+    const old = await db.store.snapshot(c),
+      oldId = old.symbols.find((s) => s.file === "lib/old.ts" && s.kind === "FUNCTION")?.id;
+    expect(old.edges.some((e) => e.type === "CALLS" && e.target === oldId)).toBe(true);
+    await writeFile(resolve(f.root, "lib/package.json"), '{"name":"lib","exports":"./new.ts"}');
+    expect((await index.index()).reason).toBe("PARSER_CONFIG_SCHEMA_CHANGED");
+    const updated = await db.store.snapshot(c),
+      newId = updated.symbols.find((s) => s.file === "lib/new.ts" && s.kind === "FUNCTION")?.id;
+    expect(updated.edges.some((e) => e.type === "CALLS" && e.target === newId)).toBe(true);
+    expect(updated.edges.some((e) => e.type === "CALLS" && e.target === oldId)).toBe(false);
+    expect((await index.index()).reason).toBe("UNCHANGED");
+  } finally {
+    await f.dispose();
+    await db.dispose();
+  }
+});

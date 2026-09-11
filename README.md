@@ -2,7 +2,7 @@
 
 Local code intelligence and explicit project memory for MCP coding agents. Bun + TypeScript Compiler API + PostgreSQL. No telemetry, LLM inference, embeddings or external code uploads.
 
-**Development foundation (`0.1.0-dev`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 12 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. There is no v0.1.0 release tag yet.
+**Development foundation (`0.1.0-alpha.1`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 12 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
 
 ## Install and run
 
@@ -57,7 +57,7 @@ Create a separate configuration for each selected project. The MCP process canno
 
 ## How indexing works
 
-The scanner respects `.gitignore`, config exclusions, source size limits, secret exclusions, and nested repository boundaries. All symlinks are excluded. Compiler reads use the scanner's in-memory allowlist. Unresolved and external calls remain explicit.
+The scanner respects `.gitignore`, config exclusions, source size limits, secret exclusions, and nested repository boundaries. All symlinks are excluded. Compiler reads use the scanner's in-memory allowlist. Unresolved and external calls remain explicit. Declared workspaces, conditional exports and in-scope project references are supported without builds; see [parser coverage](docs/parser.md).
 
 Hashes and parser/config/schema fingerprints prevent parsing or graph writes on an unchanged reopen. Source changes currently trigger conservative semantic re-analysis of the **selected project** to repair dependent callers. Only changed file content is persisted; complete graph publication is one PostgreSQL transaction. Readers receive a consistent completed snapshot.
 

@@ -5,8 +5,9 @@ Recorded on 2026-09-11. See the development tracker for release scope.
 - Dependency installation with Bun succeeded; versions are locked in bun.lock.
 - PostgreSQL + pgvector Compose service started healthy.
 - Tests create fresh randomly named databases and apply migrations; test databases are removed afterward.
-- Final local checks passed: `bun run lint`, `bun run typecheck`, `bun run test` (25 tests across 6 files), and `bun run build`.
-- Test split: 12 unit, 7 PostgreSQL integration, 6 real CLI/MCP E2E.
+- Phase 3 local checks passed: `bun run lint`, `bun run typecheck`, `bun run test` (44 tests across 8 files), and `bun run build`.
+- Test split: 30 unit, 8 PostgreSQL integration, 6 real CLI/MCP E2E.
+- Parser coverage includes workspace exports/conditions, referenced custom configs, declaration output redirects, ignored/outside configuration boundaries, overloads, accessors, CommonJS and shadowed module globals. See `parser.md` for the supported scope and limits.
 - Compiled Bun entry `bun dist/index.js --help` ran successfully.
 - SDK v2 client E2E exercises tool listing, scoped structured symbol search, callers and rejection of repository ID injection.
 - Raw Bun processes verify EOF, SIGINT and SIGTERM shutdown, watcher stop and subsequent advisory lock acquisition.
@@ -29,5 +30,7 @@ These small synthetic fixtures do not establish production performance for 10,00
 ## Real repository smoke test
 
 The current CodeMemory repository indexed successfully: 35 source files, 15 excluded entries. `createProjectContext` resolved first to its function declaration in `packages/shared/src/index.ts`. A second index returned `UNCHANGED`, zero changed/deleted files and generation 1. This smoke test first discovered duplicate unresolved identities for nested calls; regression 002 reproduced the failure before the fix.
+
+The Phase 3 smoke test indexed 52 files with 15 excluded entries using the new parser. An immediately repeated compiled-CLI index returned `UNCHANGED`, zero changed/deleted files and the same generation (25). The earlier 35-file sample above records the initial foundation run.
 
 An idle PostgreSQL backend was deliberately terminated in a regression test. The pool reported the disconnect and successfully opened a replacement connection; the process stayed alive.

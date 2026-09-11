@@ -1,0 +1,1 @@
+{"name":"@demo/web","type":"module","dependencies":{"@demo/math":"workspace:*"}}

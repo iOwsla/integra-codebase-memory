@@ -1,13 +1,19 @@
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { extname, relative, resolve } from "node:path";
-import type { FileScanner, IndexedFile, ProjectContext } from "@codememory/core";
+import type {
+  ConfigurationReferences,
+  FileScanner,
+  IndexedFile,
+  ProjectContext,
+} from "@codememory/core";
 import { forbidden, hash, id, safePath, slash } from "@codememory/shared";
 import ignore, { type Ignore } from "ignore";
 import picomatch from "picomatch";
 export type ScanObserver = (event: "scan" | "hash" | "read", path: string) => void;
 export class RepositoryScanner implements FileScanner {
   constructor(private readonly observe: ScanObserver = () => {}) {}
-  async scan(context: ProjectContext) {
+  async scan(context: ProjectContext, references?: ConfigurationReferences) {
+    const jsonCandidates = new Map<string, string>();
     const files: IndexedFile[] = [];
     const configs = new Map<string, string>();
     let excluded = 0;
@@ -59,6 +65,7 @@ export class RepositoryScanner implements FileScanner {
           continue;
         }
         if (!entry.isFile()) continue;
+        if (entry.name.endsWith(".json")) jsonCandidates.set(path, rel);
         const config = /^(tsconfig.*\.json|jsconfig.*\.json|package\.json)$/.test(entry.name);
         const source = /\.(?:[cm]?[jt]sx?)$/.test(entry.name);
         if (!source && !config) continue;
@@ -112,6 +119,30 @@ export class RepositoryScanner implements FileScanner {
       }
     };
     await walk(context.canonicalRoot, []);
+    // The language plugin proposes metadata paths; only already-discovered, eligible
+    // in-scope JSON files can be read. References never trigger directory traversal.
+    const visited = new Set<string>();
+    const queue = [...configs.keys()];
+    while (references && queue.length) {
+      const rel = queue.shift() as string;
+      if (visited.has(rel)) continue;
+      visited.add(rel);
+      for (const candidate of references(
+        resolve(context.canonicalRoot, rel),
+        configs.get(rel) ?? "",
+      )) {
+        const next = jsonCandidates.get(resolve(candidate));
+        if (!next || visited.has(next)) continue;
+        if (!configs.has(next)) {
+          const actual = await safePath(context, next);
+          const info = await lstat(actual);
+          if (info.size > 65536) continue;
+          this.observe("read", actual);
+          configs.set(next, await readFile(actual, "utf8"));
+        }
+        queue.push(next);
+      }
+    }
     files.sort((a, b) => a.path.localeCompare(b.path));
     return { files, configs, excluded };
   }

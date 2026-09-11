@@ -119,6 +119,7 @@
       "dependencies": {
         "@codememory/core": "workspace:*",
         "@codememory/shared": "workspace:*",
+        "picomatch": "^4.0.7",
         "typescript": "6.0.3",
       },
     },

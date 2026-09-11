@@ -1,6 +1,6 @@
 {
   "name": "@codememory/plugin-typescript",
-  "version": "0.1.0-dev",
+  "version": "0.1.0-alpha.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -10,6 +10,7 @@
   "dependencies": {
     "@codememory/core": "workspace:*",
     "@codememory/shared": "workspace:*",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "picomatch": "^4.0.7"
   }
 }

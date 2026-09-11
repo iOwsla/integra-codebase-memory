@@ -4,4 +4,4 @@ A symbol has a deterministic repository-root/file/kind/qualified-name identity. 
 
 `get_symbol`, callers/callees and references accept IDs. Names with multiple declarations produce `AMBIGUOUS_SYMBOL` candidates. Import/export aliases have separate identities and rank below actual definitions. Traversal has depth, path and expansion bounds plus cycle detection.
 
-Anonymous and block-local identities include a source offset and may change after edits that move their position. Named function overloads share an identity. Exhaustive framework routes, events, database tables and Cypher are not exposed in v0.1.
+Anonymous and block-local identities include a source offset and may change after edits that move their position. Named function overloads share an identity and retain the complete declaration range. Getter and setter identities are distinct. Exhaustive framework routes, events, database tables and Cypher are not exposed in v0.1.
