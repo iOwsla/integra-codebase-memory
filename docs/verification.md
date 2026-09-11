@@ -311,3 +311,20 @@ tests and the Linux full suite are required hosted gates for this release. Local
 macOS results do not establish Windows acceptance. Full large-monorepo concurrent
 lifecycle testing, release-folder garbage collection and graph/Prisma field-report
 items remain open; see [field feedback](field-feedback.md).
+
+Hosted alpha.17 [CI](https://github.com/iOwsla/integra-codebase-memory/actions/runs/34656601806)
+and [release verification](https://github.com/iOwsla/integra-codebase-memory/actions/runs/34656785679)
+passed on Linux, macOS and Windows, including native process retirement and both
+PowerShell versions. A subsequent published-package smoke check exposed the CLI
+version-option collision described below; the alpha.17 tag was not changed.
+
+## Alpha.18 update argument routing (2026-09-12)
+
+The root CLI now parses options positionally so `update --version <release>`
+reaches the update command instead of printing the installed CLI version. The
+native upgrade script rejects an invalid selected tag without network/database
+access and verifies that ordinary shared-launcher `--version` still works.
+
+Local lint, typecheck and build passed, followed by five targeted tests in three
+files covering upgrade activation, management state and runtime diagnostics.
+The hosted full suite and all native platform gates must pass for this release.

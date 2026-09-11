@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-alpha.18 — 2026-09-12
+
+- Fix `update --version <release>` being intercepted by the root CLI version flag. Keep ordinary `codememory --version` behavior and allow the selected published release to reach the updater.
+- Add native CLI argument-routing regression coverage to the Windows/macOS/Linux upgrade acceptance check. Alpha.17 remains immutable; its unpinned `update` command and bootstrap upgrade are available.
+
 ## 0.1.0-alpha.17 — 2026-09-12
 
 - Add stable shared CLI/MCP dispatchers and one-command published-release updates across registered projects, with version checks, preflight, backups and retained old runtimes.

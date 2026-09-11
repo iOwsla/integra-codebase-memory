@@ -1,7 +1,7 @@
 #!/bin/sh
 # Standalone, stdin-safe bootstrap for a pinned CodeMemory release.
 set -eu
-version=v0.1.0-alpha.17
+version=v0.1.0-alpha.18
 project=
 client=
 apply=false

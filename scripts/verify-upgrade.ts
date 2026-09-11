@@ -38,6 +38,20 @@ const launch = async (entry: string, project: string) => {
   return child;
 };
 try {
+  // The root version flag must not consume the update subcommand's version value.
+  await assert.rejects(
+    exec(
+      process.execPath,
+      [resolve(runtimeRoot, "apps/cli/src/index.ts"), "update", "--version", "invalid-tag"],
+      { env },
+    ),
+    (error: unknown) => {
+      const result = error as { stdout: string; stderr: string };
+      assert.equal(result.stdout, "");
+      assert.match(result.stderr, /No verified release available/);
+      return true;
+    },
+  );
   const a = resolve(root, "project A"),
     b = resolve(root, "project B");
   for (const project of [a, b]) {
