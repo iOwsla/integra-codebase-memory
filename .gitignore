@@ -7,3 +7,8 @@ coverage/
 
 # Machine-local MCP connection settings
 .codex/config.toml
+
+# integra-code-memory:local-config:start
+/.codex/config.toml
+/.mcp.json
+# integra-code-memory:local-config:end

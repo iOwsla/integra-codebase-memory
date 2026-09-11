@@ -1,5 +1,7 @@
 # Claude Code setup
 
+For automatic project-only integration, use the [installer](installer.md).
+
 Complete the [shared setup](common.md) first and ensure the Claude Code CLI is
 installed. Run this command **from the target project directory**:
 

@@ -1,5 +1,7 @@
 # Shared setup: the CodeMemory server
 
+For automatic project-only integration, use the [installer](installer.md).
+
 The CodeMemory repository contains the server installation; the target project
 is the repository you want to index. These can be different directories. Replace
 `/absolute/...` placeholders with your actual absolute paths. CodeMemory uses

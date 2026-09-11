@@ -204,3 +204,18 @@ returned 10 records. The verifier retries INDEX_BUSY instead of mistaking normal
 concurrent index ownership for a permanent startup failure. This verifies the
 transport and persisted index, not tool availability in an already-open AI chat.
 The project-scoped client connection is installed locally and excluded from Git.
+
+## Project-only installer (alpha.11)
+
+All 92 tests across 15 files passed locally (35.52 seconds), along with lint,
+typecheck, build and `sh -n install.sh`. Eleven installer E2E cases run the shell
+entry from a foreign working directory, with an invalid database URL, and cover
+preview without writes, explicit root/client validation, nested scope isolation,
+paths with spaces, client selection, config/instruction preservation, idempotence,
+malformed/conflicting configuration, ambiguous markers and linked destinations.
+
+The installer was applied to this repository for both clients. It preserved the
+existing Codex connection and shared instructions, added the local Claude project
+connection and ignore block, then reported zero changed files on repetition.
+Both machine-local config files are Git-ignored. This verifies file installation;
+Claude Code's own trust/connection approval is still a client-side check.

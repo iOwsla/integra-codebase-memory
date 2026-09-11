@@ -2,7 +2,7 @@
 
 Local code intelligence and explicit project memory for MCP coding agents. Bun + TypeScript Compiler API + PostgreSQL. No telemetry, LLM inference, embeddings or external code uploads.
 
-**Development foundation (`0.1.0-alpha.10`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 12 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
+**Development foundation (`0.1.0-alpha.11`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 12 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
 
 ## Install and run
 
@@ -33,6 +33,19 @@ bun run dev mcp --project /absolute/path/to/repository --auto-index --watch
 For a `codememory` executable, run `bun link` inside `apps/cli`, or invoke the absolute `apps/cli/src/index.ts` path with Bun. Keep the workspace and dependencies installed; the build is a Bun entry point, not a standalone binary.
 
 Only MCP requires an explicit absolute `--project`. CLI indexing accepts a positional path; commands without a path use the current directory and never climb to a Git root. No command automatically scans other registered projects.
+
+## Project-only installer
+
+After installing server dependencies and preparing PostgreSQL:
+
+```sh
+./install.sh --project /absolute/target-project --client both --write
+```
+
+Choose `codex`, `claude` or `both`. Omit `--write` for a preview. This merges
+project-local connections and marked instructions; it never registers a global
+server or indexes other repositories. Indexing starts when the selected client
+opens the project. See [installer behavior and prerequisites](docs/setup/installer.md).
 
 ## MCP client configuration
 

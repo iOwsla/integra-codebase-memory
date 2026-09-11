@@ -1,5 +1,7 @@
 # Codex setup
 
+For automatic project-only integration, use the [installer](installer.md).
+
 Complete the [shared setup](common.md) first. From the CodeMemory installation:
 
 ```sh

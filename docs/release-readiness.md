@@ -7,7 +7,7 @@ item below; short smoke tests do not close long-duration or large-project gates.
 | --- | --- |
 | Project isolation and atomic graph publication | Existing integration and CLI/MCP tests |
 | Watcher recovery | Bounded regressions plus five-minute own-repository simulation; multi-hour run still required |
-| Daily MCP use | Project config generator, initialization instructions and standalone transport verification implemented; verify tools in a reloaded AI client |
+| Daily MCP use | Project-only Codex/Claude installer, initialization instructions and standalone transport verification implemented; verify tools in a reloaded AI client |
 | Setup and distribution | Source-checkout installation documented; a portable versioned installation/upgrade path remains open |
 | Large-project acceptance | Full parser, publication and SQL query sample on suitable hardware remains open |
 | Memory behavior | Sampled parent/worker RSS available; sustained trend and total peak-memory acceptance remain open |

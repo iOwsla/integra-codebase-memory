@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha.11 — 2026-09-11
+
+### Added
+- `install.sh --project /absolute/project --client codex|claude|both [--write]` for explicitly project-scoped integration. Preview is the default.
+- Merge client settings, maintain marked instruction blocks and ignore machine-local connection files while preserving unrelated settings. Repeated identical installation is a no-op.
+- Installer E2E coverage for scope isolation, settings preservation, malformed/conflicting input, linked destinations and idempotence.
+
+### Scope
+- The installer performs no database or indexing work. Client startup triggers the selected project only; existing global servers remain independently configured. PostgreSQL and installed server dependencies are prerequisites.
+
 ## 0.1.0-alpha.10 — 2026-09-11
 
 ### Added
