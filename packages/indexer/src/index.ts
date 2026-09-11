@@ -132,6 +132,7 @@ export class ProjectSession {
   private closing = false;
   private pending = new Set<string>();
   private lastError?: string;
+  private lastErrorMessage?: string;
   private lastResult?: IndexResult;
   private stopped?: Promise<void>;
   constructor(
@@ -181,7 +182,10 @@ export class ProjectSession {
       try {
         this.lastResult = await this.indexer.index();
         this.lastError = undefined;
+        this.lastErrorMessage = undefined;
       } catch (e) {
+        this.lastErrorMessage =
+          e instanceof CodeMemoryError && e.code === "PARSER_ERROR" ? e.message : undefined;
         this.lastError = e instanceof CodeMemoryError ? e.code : "INDEX_ERROR";
         if (this.lastError === "INDEX_BUSY") this.schedule("lock-retry", 500);
         else await this.store.recordFailure(this.context, this.lastError).catch(() => {});
@@ -221,6 +225,7 @@ export class ProjectSession {
       incomplete: !persisted.version,
       excludedFiles: (persisted.last_run as IndexResult | undefined)?.excluded ?? 0,
       error: this.lastError,
+      errorMessage: this.lastErrorMessage,
       lastReanalysisReason:
         this.lastResult?.reason ?? (persisted.last_run as IndexResult | undefined)?.reason,
       ...persisted,

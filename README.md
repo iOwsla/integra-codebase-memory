@@ -2,7 +2,9 @@
 
 Local code intelligence and explicit project memory for MCP coding agents. Bun + TypeScript Compiler API + PostgreSQL. No telemetry, LLM inference, embeddings or external code uploads.
 
-**Development foundation (`0.1.0-alpha.14`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 14 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
+**Development foundation (`0.1.0-alpha.15`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 14 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
+
+Management commands and reboot recovery: [CLI guide](docs/installation.md). Large project parser settings: [indexing guide](docs/indexing.md).
 
 ## Install and run
 
@@ -39,7 +41,7 @@ Only MCP requires an explicit absolute `--project`. CLI indexing accepts a posit
 With Bun and Git installed, run from any directory:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.14/bootstrap.sh | sh -s -- --project /absolute/target-project --client both --write
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.15/bootstrap.sh | sh -s -- --project /absolute/target-project --client both --write
 ```
 
 Choose `codex`, `claude` or `both`. Omit `--write` for a no-write preview.
@@ -52,7 +54,7 @@ see [curl setup, repeat installs and upgrades](docs/setup/installer.md#curl-boot
 ### Windows PowerShell
 
 ```powershell
-& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.14/bootstrap.ps1').Content)) -Project 'C:\Projects\My App' -Client both -Write
+& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.15/bootstrap.ps1').Content)) -Project 'C:\Projects\My App' -Client both -Write
 ```
 
 Works with Windows PowerShell 5.1 and PowerShell 7. Requires Bun and Git;

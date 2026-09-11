@@ -10,7 +10,12 @@ const exec = promisify(execFile);
 const run = (root: string, client = "both", write = true) =>
   exec("sh", [installer, "--project", root, "--client", client, ...(write ? ["--write"] : [])], {
     cwd: "/tmp",
-    env: { ...process.env, DATABASE_URL: "postgresql://invalid.invalid/never-connect" },
+    env: {
+      ...process.env,
+      XDG_DATA_HOME: resolve(root, ".codememory/test-runtime"),
+      LOCALAPPDATA: resolve(root, ".codememory/test-runtime"),
+      DATABASE_URL: "postgresql://invalid.invalid/never-connect",
+    },
   });
 
 it("requires an explicit root/client and previews without creating files", async () => {
@@ -176,6 +181,75 @@ it("previews managed service connections without provisioning or exposing creden
     ]);
     expect(JSON.parse(result.stdout)).toMatchObject({ applied: false, servicesPlanned: true });
     expect(await readdir(f.root)).toEqual([]);
+  } finally {
+    await f.dispose();
+  }
+});
+
+it("manages registrations and installs a working CLI with no database", async () => {
+  const f = await fixture({ "project/main.ts": "export const answer=42" });
+  const cli = resolve("apps/cli/src/index.ts");
+  const env = {
+    ...process.env,
+    XDG_DATA_HOME: resolve(f.root, "state"),
+    LOCALAPPDATA: resolve(f.root, "state"),
+    DATABASE_URL: "postgresql://invalid.invalid/never-connect",
+    CODEMEMORY_UPDATE_CHECK: "0",
+  };
+  const command = (...args: string[]) => exec("bun", [cli, ...args], { env });
+  const project = resolve(f.root, "project");
+  try {
+    const installed = JSON.parse((await command("system", "install-cli")).stdout);
+    expect(
+      JSON.parse((await exec(installed.executable, ["projects", "list"], { env })).stdout),
+    ).toEqual([]);
+    await command("projects", "add", project, "--client", "both", "--external-db", "--no-index");
+    expect(JSON.parse((await command("projects", "list")).stdout)).toMatchObject([
+      { root: project, enabled: true },
+    ]);
+    await expect(command("projects", "remove", project)).rejects.toBeDefined();
+    await command("projects", "remove", project, "--yes");
+    await expect(command("mcp", "--project", project, "--auto-index")).rejects.toBeDefined();
+    expect(await readFile(resolve(project, "main.ts"), "utf8")).toContain("answer=42");
+    await command("projects", "add", project, "--client", "both", "--external-db", "--no-index");
+    expect(JSON.parse((await command("projects", "list")).stdout)).toMatchObject([
+      { enabled: true },
+    ]);
+  } finally {
+    await f.dispose();
+  }
+});
+
+it("adds the current directory without expanding to a parent repository", async () => {
+  const f = await fixture({
+    "parent/.git/HEAD": "ref: refs/heads/main",
+    "parent/child/main.ts": "export const selected=1",
+  });
+  const project = resolve(f.root, "parent/child");
+  const cli = resolve("apps/cli/src/index.ts");
+  const env = {
+    ...process.env,
+    XDG_DATA_HOME: resolve(f.root, "state"),
+    LOCALAPPDATA: resolve(f.root, "state"),
+    DATABASE_URL: "postgresql://invalid.invalid/never-connect",
+  };
+  try {
+    await exec("bun", [cli, "projects", "add", "--client", "both", "--external-db", "--no-index"], {
+      cwd: project,
+      env,
+    });
+    const entries = JSON.parse(
+      (await exec("bun", [cli, "projects", "list"], { cwd: project, env })).stdout,
+    );
+    expect(entries).toMatchObject([{ root: project, enabled: true }]);
+    expect(await readdir(resolve(f.root, "parent"))).toEqual(
+      expect.arrayContaining([".git", "child"]),
+    );
+    expect(await readdir(resolve(f.root, "parent"))).not.toContain(".mcp.json");
+    await exec("bun", [cli, "projects", "remove", "--yes"], { cwd: project, env });
+    expect(
+      JSON.parse((await exec("bun", [cli, "projects", "list"], { cwd: project, env })).stdout),
+    ).toMatchObject([{ enabled: false }]);
   } finally {
     await f.dispose();
   }

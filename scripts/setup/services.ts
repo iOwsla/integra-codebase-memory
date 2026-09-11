@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { lstat, mkdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { PostgresStore } from "@codememory/database";
+import { runtimeRoot } from "../runtime-root";
 import {
   checkLocalPath,
   composeDefinition,
@@ -14,7 +14,7 @@ import {
   volumeName,
 } from "./service-state";
 
-const here = fileURLToPath(new URL(".", import.meta.url));
+const here = resolve(runtimeRoot, "scripts/setup");
 export type Run = (
   command: string[],
   interactive?: boolean,
@@ -32,7 +32,7 @@ export const run: Run = async (command, interactive = false) => {
   clearTimeout(timer);
   return { code, out };
 };
-function dockerExecutable(platform: NodeJS.Platform = process.platform) {
+export function dockerExecutable(platform: NodeJS.Platform = process.platform) {
   const candidates =
     platform === "darwin"
       ? ["/Applications/Docker.app/Contents/Resources/bin/docker"]
@@ -114,7 +114,12 @@ export async function ensureDocker(
   return command;
 }
 export async function setupServices(
-  options: { directory?: string; execute?: Run; migrate?: (url: string) => Promise<void> } = {},
+  options: {
+    directory?: string;
+    execute?: Run;
+    migrate?: (url: string) => Promise<void>;
+    restart?: boolean;
+  } = {},
 ) {
   const directory = options.directory || serviceDirectory();
   const execute = options.execute || run;
@@ -201,6 +206,7 @@ export async function setupServices(
         compose,
         "up",
         "-d",
+        ...(options.restart ? ["--force-recreate"] : []),
         "--wait",
         "--wait-timeout",
         "180",
@@ -226,7 +232,7 @@ export async function setupServices(
     await rm(lock, { recursive: true, force: true });
   }
 }
-if (import.meta.main) {
+if (import.meta.main && process.argv[1]?.endsWith("services.ts")) {
   try {
     console.log(JSON.stringify(await setupServices()));
   } catch (e) {

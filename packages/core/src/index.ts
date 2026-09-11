@@ -17,6 +17,7 @@ export type Resolution = "AST_CONFIRMED" | "SEMANTIC_CONFIRMED" | "HEURISTIC" | 
 export interface EffectiveConfig {
   readonly maxFileSizeBytes: number;
   readonly parserTimeoutMs: number;
+  readonly parserOutputLimitMiB: number;
   readonly exclude: readonly string[];
   readonly include: readonly string[];
   readonly excludeGenerated: boolean;

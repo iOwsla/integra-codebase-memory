@@ -9,6 +9,8 @@ function Must-Fail([scriptblock]$Action) {
     try { & $Action | Out-Null } catch { $failed = $true }
     Assert $failed "Expected an error: $Action"
 }
+$previousLocalAppData = $env:LOCALAPPDATA
+$env:LOCALAPPDATA = Join-Path $temporary "state"
 try {
     $project = Join-Path $temporary 'target project [one]'
     [void][IO.Directory]::CreateDirectory($project)
@@ -31,6 +33,20 @@ try {
         & $installer -Project $single -Client $client -Write | Out-Null
         Assert ((Test-Path -LiteralPath (Join-Path $single '.mcp.json')) -eq ($client -eq 'claude')) 'Incorrect client scope.'
     }
+    $managementCli = Join-Path $env:LOCALAPPDATA 'integra-code-memory/cli/bin/codememory.cmd'
+    Assert (Test-Path -LiteralPath $managementCli) 'Management CLI was not installed before database setup.'
+    $cliProject = Join-Path $temporary 'CLI current directory'
+    [void][IO.Directory]::CreateDirectory($cliProject)
+    Push-Location -LiteralPath $cliProject
+    try {
+        & $managementCli projects add --client both --external-db --no-index | Out-Null
+        Assert ($LASTEXITCODE -eq 0) 'CLI current-directory add failed without a database.'
+        $registered = @(& $managementCli projects list | ConvertFrom-Json)
+        Assert ($LASTEXITCODE -eq 0) 'CLI list failed.'
+        Assert (@($registered | Where-Object { $_.root -eq $cliProject -and $_.enabled }).Count -eq 1) 'CLI selected the wrong directory.'
+        & $managementCli projects remove --yes | Out-Null
+        Assert ($LASTEXITCODE -eq 0) 'CLI current-directory removal failed.'
+    } finally { Pop-Location }
     $runtime = Join-Path $temporary 'runtime'
     & $bootstrap -Project $project -Client both -InstallDir $runtime | Out-Null
     Assert (-not (Test-Path -LiteralPath $runtime)) 'Bootstrap preview wrote files.'
@@ -40,7 +56,7 @@ try {
 
     if ($env:TEST_PUBLISHED_BOOTSTRAP -eq 'true') {
         $downloadedScript = Join-Path $temporary 'downloaded-bootstrap.ps1'
-        Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.14/bootstrap.ps1' -OutFile $downloadedScript
+        Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.15/bootstrap.ps1' -OutFile $downloadedScript
         $liveProject = Join-Path $temporary 'downloaded target'
         [void][IO.Directory]::CreateDirectory($liveProject)
         $liveRuntime = Join-Path $temporary 'downloaded runtime'
@@ -61,7 +77,7 @@ try {
             [void][IO.Directory]::CreateDirectory((Join-Path $destination '.git'))
             Set-Content -LiteralPath (Join-Path $destination 'install.ps1') -Value 'param($Project, $Client, [switch]$Write, [switch]$WithServices) if (-not $Write) { throw "Missing write" }; Set-Content -LiteralPath (Join-Path $PSScriptRoot "received.txt") -Value "$Project|$Client"'
         } elseif ($args[2] -eq 'remote') { 'https://github.com/iOwsla/integra-codebase-memory.git' }
-        elseif ($args[2] -eq 'describe') { 'v0.1.0-alpha.14' }
+        elseif ($args[2] -eq 'describe') { 'v0.1.0-alpha.15' }
     }
     function bun {
         $global:LASTEXITCODE = 0
@@ -106,5 +122,6 @@ try {
     $global:LASTEXITCODE = 0
     Write-Output 'Windows installer acceptance passed: real project integration, previews, repeats, explicit scope, bootstrap and failure cleanup.'
 } finally {
+    $env:LOCALAPPDATA = $previousLocalAppData
     Remove-Item -LiteralPath $temporary -Recurse -Force
 }

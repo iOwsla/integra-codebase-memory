@@ -10,18 +10,42 @@ import { IndexService, ProjectSession, RepositoryScanner } from "@codememory/ind
 import { runMcp } from "@codememory/mcp-server";
 import { TypeScriptPlugin } from "@codememory/plugin-typescript";
 import { ProcessTypeScriptPlugin } from "@codememory/plugin-typescript/process";
-import { configSchema, createProjectContext, publicError } from "@codememory/shared";
+import {
+  checkForUpdates,
+  configSchema,
+  createProjectContext,
+  publicError,
+} from "@codememory/shared";
 import { Command } from "commander";
+import { assertProjectEnabled, listRegistrations } from "../../../scripts/setup/cli-state";
+import { managementError, registerManagementCommands } from "../../../scripts/setup/management";
+import { databaseUrl, readService } from "../../../scripts/setup/service-state";
 
 const cli = new Command()
   .name("codememory")
   .description("Local, explicitly project-scoped code intelligence")
-  .version("0.1.0-alpha.14");
+  .version("0.1.0-alpha.15");
+registerManagementCommands(cli);
+cli
+  .command("updates")
+  .description("Check public releases; never installs automatically")
+  .action(async () => {
+    print(await checkForUpdates({ force: true }));
+  });
+async function selectedStore(root: string) {
+  await assertProjectEnabled(root);
+  const registration = (await listRegistrations()).find((p) => p.root === root);
+  return new PostgresStore(
+    registration?.managed
+      ? databaseUrl(await readService(process.env.CODEMEMORY_SERVICE_DIR))
+      : undefined,
+  );
+}
 const collect = (value: string, previous: string[]) => [...previous, value];
 const print = (v: unknown) => process.stdout.write(`${JSON.stringify(v, null, 2)}\n`);
 async function open(project?: string) {
   const context = await createProjectContext(project ?? process.cwd());
-  const store = new PostgresStore();
+  const store = await selectedStore(context.canonicalRoot);
   await store.register(context).catch(async (e) => {
     await store.close();
     throw e;
@@ -250,7 +274,7 @@ cli
   .option("--watch", "Watch selected project for the lifetime of this process")
   .action(async (options) => {
     const context = await createProjectContext(options.project);
-    const store = new PostgresStore();
+    const store = await selectedStore(context.canonicalRoot);
     const indexer = new IndexService(
       context,
       store,
@@ -279,7 +303,9 @@ scoped("watch [path]", "Watch selected project until SIGINT or SIGTERM").action(
   },
 );
 cli.parseAsync().catch((error) => {
-  process.stderr.write(`${JSON.stringify(publicError(error))}\n`);
+  process.stderr.write(
+    `${JSON.stringify(publicError(["system", "projects", "updates"].includes(process.argv[2] ?? "") ? managementError(error) : error))}\n`,
+  );
   if (process.env.CODEMEMORY_DEBUG === "1") process.stderr.write(`${String(error)}\n`);
   process.exitCode = 1;
 });

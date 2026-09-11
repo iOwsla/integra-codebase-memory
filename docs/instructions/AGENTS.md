@@ -94,4 +94,8 @@ root/generation, evidence level, bounded scope, symbol IDs, paths, query directi
 pagination state, source checks and unresolved limits. Do not assume another
 agent has MCP access or inherits this context. An agent without access must use
 the supplied evidence and targeted source reads, and disclose that limitation.
+
+## Updates
+
+When `codebase_status.updates.state` is `available`, tell the user which newer release is available and ask whether to update. Never install updates without user approval. Update checks occur only when status is queried; do not promise background notifications.
 <!-- integra-code-memory:end -->

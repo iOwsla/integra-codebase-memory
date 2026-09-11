@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.15 — 2026-09-12
+
+- Stream parser output as bounded newline-delimited records, replacing the fixed 256 MiB buffered JSON transport. Add validated `parserOutputLimitMiB` (default 1024, range 1–8192) and preserve safe parser diagnostics in MCP session status.
+- Install a user-local management CLI before Docker/WSL/database provisioning. Add database-independent system status, setup/start/restart recovery, explicit project registrations and non-destructive project disabling. Selected-project recovery indexes only that project.
+- Report newer public releases through `codememory updates` and MCP status. Cache checks per process, tolerate offline operation, support opt-out and instruct assistants to ask before updating; never auto-install.
+- Add regression coverage for output larger than 256 MiB, split UTF-8, truncated streams, error recovery, offline CLI registration and release notification policy. Full affected Windows project acceptance remains outstanding.
+
 ## 0.1.0-alpha.14 — 2026-09-12
 
 - Bootstrap installers now prepare Docker and dedicated PostgreSQL by default; connection-only mode remains available.

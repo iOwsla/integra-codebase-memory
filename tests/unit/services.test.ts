@@ -189,3 +189,24 @@ it("bounds engine waiting by elapsed time instead of an unbounded retry duration
   await expect(ensureDocker(execute, "darwin")).rejects.toThrow("180 seconds");
   expect(execute.mock.calls.filter(([c]) => c.includes("info")).length).toBeLessThanOrEqual(4);
 });
+it("explicit restart recreates only the validated managed service and preserves its volume", async () => {
+  const f = await fixture({});
+  try {
+    const execute = engine();
+    await setupServices({
+      directory: resolve(f.root, "service"),
+      execute,
+      migrate: async () => {},
+      restart: true,
+    });
+    const commands = execute.mock.calls.map(([command]) => command);
+    expect(
+      commands.some((command) => command.includes("up") && command.includes("--force-recreate")),
+    ).toBe(true);
+    expect(
+      commands.some((command) => command.includes("down") || command.includes("--volumes")),
+    ).toBe(false);
+  } finally {
+    await f.dispose();
+  }
+});

@@ -41,7 +41,7 @@ export async function connectCodex(root: string, executable: string, entry: stri
   }
   return { path, config, written: true };
 }
-if (import.meta.main) {
+if (import.meta.main && process.argv[1]?.endsWith("connect-codex.ts")) {
   const args = process.argv.slice(2);
   if (!args[0] || args.length > 2 || (args[1] && args[1] !== "--write"))
     throw new Error("Usage: bun run connect:codex /absolute/project [--write]");

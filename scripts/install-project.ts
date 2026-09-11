@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { createProjectContext } from "@codememory/shared";
 import { Command } from "commander";
 import { connectCodex } from "./connect-codex";
+import { runtimeRoot } from "./runtime-root";
+import { installManagementCli, saveRegistration } from "./setup/cli-state";
 import { serviceDirectory } from "./setup/service-state";
 
-const serverRoot = fileURLToPath(new URL("../", import.meta.url));
+const serverRoot = runtimeRoot;
 const name = "integra_code_memory";
 const start = "<!-- integra-code-memory:start -->";
 const end = "<!-- integra-code-memory:end -->";
@@ -186,7 +187,7 @@ export async function installProject(root: string, client: string, write = false
     next: "Open this project in the selected client, approve/reload its MCP connection if prompted, then call codebase_status. PostgreSQL must be running. Indexing starts when the client opens the connection.",
   };
 }
-if (import.meta.main) {
+if (import.meta.main && process.argv[1]?.endsWith("install-project.ts")) {
   const command = new Command()
     .description("Install CodeMemory only into an explicitly selected project")
     .requiredOption("--project <absolute-path>", "Target project; no parent/root inference")
@@ -211,6 +212,15 @@ if (import.meta.main) {
       false,
       options.withServices,
     );
+    if (options.write) {
+      await installManagementCli();
+      await saveRegistration({
+        root: preview.projectRoot,
+        client: options.client as "codex" | "claude" | "both",
+        managed: !!options.withServices,
+        enabled: true,
+      });
+    }
     if (options.withServices && options.write) {
       const { setupServices } = await import("./setup/services");
       await setupServices();

@@ -245,3 +245,17 @@ Linux CI repeats real service acceptance. macOS CI runs portable installer tests
 Windows CI runs PowerShell 5.1/7 project setup and mocked WSL feature preparation
 with a restart-required result. Clean interactive Docker installation, vendor
 prompts and actual WSL reboot acceptance are not established by these tests.
+
+## Streaming parser and management CLI (alpha.15)
+
+Local acceptance on macOS arm64 / Bun 1.3.3:
+
+- A 257 MiB-plus synthetic output stream passes through the parser protocol without accumulating serialized output. Split UTF-8, configured limits, invalid records, deadlines and missing completion markers are covered.
+- The real isolated parser passes the call-owner regression fixture with no duplicate symbols/edges, foreign symbols or dangling edges.
+- A failed parser's safe error detail appears in session status and clears after successful recovery.
+- Database-independent CLI installation, registration, disabling and re-enabling pass with an invalid database URL. Current-directory selection remains scoped to the child folder even under a parent Git repository.
+- Real disposable Docker acceptance verifies health checks, migrations, persistence across restart and managed launcher database isolation. Unit coverage verifies explicit force-recreation does not remove volumes.
+- The bundled CLI produces a launcher pointing to the source runtime; importing installer modules does not execute their standalone entrypoints.
+- Update policy tests cover numeric alpha ordering, stable channels, draft exclusion, fixed release links, offline failure and disabled checks. Release-body text is never returned as assistant instructions.
+
+The reported Windows project with 4,316 files / approximately 47 MB source is not available in this workspace. Full indexing of that exact project and clean-machine interactive Docker/WSL installation remain separate acceptance work; transport regression coverage does not establish their completion.

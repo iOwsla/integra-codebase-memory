@@ -15,6 +15,7 @@ export const configSchema = z
       .max(16 * 1024 * 1024)
       .default(2097152),
     parserTimeoutMs: z.number().int().min(1000).max(600000).default(120000),
+    parserOutputLimitMiB: z.number().int().min(1).max(8192).default(1024),
     include: z.array(z.string().max(500)).max(100).default([]),
     exclude: z.array(z.string().max(500)).max(100).default([]),
     excludeGenerated: z.boolean().default(false),
@@ -120,3 +121,5 @@ export function publicError(error: unknown): { code: string; message: string } {
   return { code: "INTERNAL_ERROR", message: "Operation failed; inspect local diagnostics" };
 }
 export const projectName = (context: ProjectContext) => basename(context.canonicalRoot);
+
+export { checkForUpdates, newerRelease } from "./updates";
