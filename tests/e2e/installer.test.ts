@@ -162,3 +162,21 @@ it("updates an existing marked block without duplicating an AGENTS import", asyn
     await f.dispose();
   }
 });
+
+it("previews managed service connections without provisioning or exposing credentials", async () => {
+  const f = await fixture({});
+  try {
+    const result = await exec("sh", [
+      installer,
+      "--project",
+      f.root,
+      "--client",
+      "both",
+      "--with-services",
+    ]);
+    expect(JSON.parse(result.stdout)).toMatchObject({ applied: false, servicesPlanned: true });
+    expect(await readdir(f.root)).toEqual([]);
+  } finally {
+    await f.dispose();
+  }
+});

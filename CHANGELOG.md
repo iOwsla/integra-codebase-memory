@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.14 — 2026-09-12
+
+- Bootstrap installers now prepare Docker and dedicated PostgreSQL by default; connection-only mode remains available.
+- Add macOS Docker Desktop, Windows WSL/Desktop and Ubuntu/Debian/Fedora Engine setup paths with explicit restart/elevation/first-run handling.
+- Keep managed credentials and PostgreSQL 17 volume independent of release folders, validate ownership, wait for health and migrate only the managed database.
+- Add a managed MCP launcher that reads private local credentials without placing secrets in project configuration.
+- Test persistent restart, migration and launcher isolation with a disposable Docker database; retain existing stable-release and interactive platform acceptance gates.
+
 ## 0.1.0-alpha.13 — 2026-09-11
 
 - Add Windows PowerShell bootstrap and source-checkout installers for explicit project-scoped Codex/Claude setup, without Bash.

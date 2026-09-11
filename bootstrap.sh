@@ -1,10 +1,11 @@
 #!/bin/sh
 # Standalone, stdin-safe bootstrap for a pinned CodeMemory release.
 set -eu
-version=v0.1.0-alpha.13
+version=v0.1.0-alpha.14
 project=
 client=
 apply=false
+services=--with-services
 install_dir=${XDG_DATA_HOME:-"$HOME/.local/share"}/integra-code-memory/releases/$version
 fail() { printf '%s\n' "$*" >&2; exit 1; }
 while [ "$#" -gt 0 ]; do
@@ -18,7 +19,8 @@ while [ "$#" -gt 0 ]; do
       esac
       shift 2 ;;
     --write) apply=true; shift ;;
-    --help) printf '%s\n' 'Usage: sh bootstrap.sh --project /absolute/project --client codex|claude|both [--install-dir /absolute/runtime] [--write]'; exit 0 ;;
+    --skip-services) services=; shift ;;
+    --help) printf '%s\n' 'Usage: sh bootstrap.sh --project /absolute/project --client codex|claude|both [--install-dir /absolute/runtime] [--write] [--skip-services]'; exit 0 ;;
     *) fail "Unknown argument: $1" ;;
   esac
 done
@@ -28,7 +30,7 @@ project=$(CDPATH= cd -- "$project" && pwd -P)
 case "$client" in codex|claude|both) ;; *) fail 'Select --client codex, claude or both.' ;; esac
 case "$install_dir" in /*) ;; *) fail '--install-dir must be absolute.' ;; esac
 if [ "$apply" = false ]; then
-  printf 'Preview: install %s in %s and configure %s for %s. Add --write to apply.\n' "$version" "$install_dir" "$client" "$project"
+  printf 'Preview: install %s in %s and configure %s for %s. Docker and managed PostgreSQL are prepared unless --skip-services is selected. Add --write to apply.\n' "$version" "$install_dir" "$client" "$project"
   exit 0
 fi
 for dependency in git bun; do
@@ -46,7 +48,7 @@ if [ -e "$install_dir" ]; then
   [ "$(git -C "$install_dir" describe --tags --exact-match HEAD)" = "$version" ] || fail 'Existing runtime has a different version.'
   [ -z "$(git -C "$install_dir" status --porcelain --untracked-files=normal)" ] || fail 'Existing runtime has local changes.'
   [ -d "$install_dir/node_modules" ] || fail 'Runtime dependencies are missing; use a fresh --install-dir.'
-  exec sh "$install_dir/install.sh" --project "$project" --client "$client" --write
+  exec sh "$install_dir/install.sh" --project "$project" --client "$client" --write ${services:+"$services"}
 fi
 parent=$(dirname -- "$install_dir")
 mkdir -p -- "$parent"
@@ -58,4 +60,4 @@ git clone --quiet --depth 1 --branch "$version" -- https://github.com/iOwsla/int
 [ ! -e "$install_dir" ] && [ ! -L "$install_dir" ] || fail 'Runtime destination appeared during download.'
 mv -- "$temporary/runtime" "$install_dir"
 printf 'Runtime installed: %s\n' "$install_dir"
-sh "$install_dir/install.sh" --project "$project" --client "$client" --write
+sh "$install_dir/install.sh" --project "$project" --client "$client" --write ${services:+"$services"}

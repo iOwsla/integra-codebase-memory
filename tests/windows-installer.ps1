@@ -40,12 +40,12 @@ try {
 
     if ($env:TEST_PUBLISHED_BOOTSTRAP -eq 'true') {
         $downloadedScript = Join-Path $temporary 'downloaded-bootstrap.ps1'
-        Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.13/bootstrap.ps1' -OutFile $downloadedScript
+        Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.14/bootstrap.ps1' -OutFile $downloadedScript
         $liveProject = Join-Path $temporary 'downloaded target'
         [void][IO.Directory]::CreateDirectory($liveProject)
         $liveRuntime = Join-Path $temporary 'downloaded runtime'
-        & $downloadedScript -Project $liveProject -Client both -InstallDir $liveRuntime -Write | Out-Null
-        & $downloadedScript -Project $liveProject -Client both -InstallDir $liveRuntime -Write | Out-Null
+        & $downloadedScript -Project $liveProject -Client both -InstallDir $liveRuntime -Write -SkipServices | Out-Null
+        & $downloadedScript -Project $liveProject -Client both -InstallDir $liveRuntime -Write -SkipServices | Out-Null
         $liveConfig = Get-Content -LiteralPath (Join-Path $liveProject '.mcp.json') -Raw | ConvertFrom-Json
         Assert ($liveConfig.mcpServers.integra_code_memory.args[3] -eq $liveProject) 'Published bootstrap selected the wrong project.'
         Write-Output 'Published PowerShell download and repeat installation passed.'
@@ -59,9 +59,9 @@ try {
             [void][IO.Directory]::CreateDirectory($destination)
             if ($global:CodeMemoryTestFailDownload) { $global:LASTEXITCODE = 8; return }
             [void][IO.Directory]::CreateDirectory((Join-Path $destination '.git'))
-            Set-Content -LiteralPath (Join-Path $destination 'install.ps1') -Value 'param($Project, $Client, [switch]$Write) if (-not $Write) { throw "Missing write" }; Set-Content -LiteralPath (Join-Path $PSScriptRoot "received.txt") -Value "$Project|$Client"'
+            Set-Content -LiteralPath (Join-Path $destination 'install.ps1') -Value 'param($Project, $Client, [switch]$Write, [switch]$WithServices) if (-not $Write) { throw "Missing write" }; Set-Content -LiteralPath (Join-Path $PSScriptRoot "received.txt") -Value "$Project|$Client"'
         } elseif ($args[2] -eq 'remote') { 'https://github.com/iOwsla/integra-codebase-memory.git' }
-        elseif ($args[2] -eq 'describe') { 'v0.1.0-alpha.13' }
+        elseif ($args[2] -eq 'describe') { 'v0.1.0-alpha.14' }
     }
     function bun {
         $global:LASTEXITCODE = 0
@@ -82,6 +82,27 @@ try {
         Assert (-not (Test-Path -LiteralPath $failedRuntime)) 'Failed runtime was published.'
         Assert (@(Get-ChildItem -LiteralPath $temporary -Filter '.codememory-download-*' -Force).Count -eq 0) 'Temporary download leaked.'
     }
+    $tokens = $null
+    $parseErrors = $null
+    [void][Management.Automation.Language.Parser]::ParseFile((Join-Path $repositoryRoot 'scripts/setup/ensure-docker.ps1'), [ref]$tokens, [ref]$parseErrors)
+    Assert ($parseErrors.Count -eq 0) 'Docker/WSL preparation script has syntax errors.'
+    $global:CodeMemoryPreparedFeatures = @()
+    function Enable-WindowsOptionalFeature {
+        param([switch]$Online, [string]$FeatureName, [switch]$All, [switch]$NoRestart)
+        Assert $NoRestart 'Preparation must not reboot automatically.'
+        $global:CodeMemoryPreparedFeatures += $FeatureName
+    }
+    function wsl.exe {
+        Assert (($args -join ' ') -eq '--install --web-download --no-distribution') 'Unexpected WSL installation arguments.'
+        $global:LASTEXITCODE = 0
+    }
+    function bcdedit.exe {
+        Assert (($args -join ' ') -eq '/set hypervisorlaunchtype auto') 'Unexpected boot configuration command.'
+        $global:LASTEXITCODE = 0
+    }
+    & (Join-Path $repositoryRoot 'scripts/setup/ensure-docker.ps1') -PrepareWsl
+    Assert ($LASTEXITCODE -eq 3010) 'Missing restart-required status.'
+    Assert ($global:CodeMemoryPreparedFeatures.Count -eq 2) 'Missing Windows features.'
     $global:LASTEXITCODE = 0
     Write-Output 'Windows installer acceptance passed: real project integration, previews, repeats, explicit scope, bootstrap and failure cleanup.'
 } finally {

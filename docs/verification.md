@@ -230,3 +230,18 @@ differences, overload implementations and arrows. Bootstrap fixtures cover stdin
 no-write previews, explicit scope, persistent downloads and failure cleanup.
 The full suite contains 96 tests in 17 files. Hosted release CI must pass before
 the prerelease is published; production acceptance gates remain open.
+
+## Managed Docker and PostgreSQL setup (alpha.14)
+
+Local macOS acceptance used a disposable real PostgreSQL Docker volume: health
+checks, migrations, stop/restart and repeated setup preserved credentials and
+stored data. Both client configurations and the managed launcher were exercised
+with an intentionally invalid inherited application DATABASE_URL and a different
+GUI XDG_DATA_HOME. Cleanup removed only that disposable owned volume.
+
+The test suite has 106 tests in 18 files, including managed ownership/orphan
+checks, lock cleanup, remote-context rejection and per-platform orchestration.
+Linux CI repeats real service acceptance. macOS CI runs portable installer tests;
+Windows CI runs PowerShell 5.1/7 project setup and mocked WSL feature preparation
+with a restart-required result. Clean interactive Docker installation, vendor
+prompts and actual WSL reboot acceptance are not established by these tests.

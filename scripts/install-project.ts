@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createProjectContext } from "@codememory/shared";
 import { Command } from "commander";
 import { connectCodex } from "./connect-codex";
+import { serviceDirectory } from "./setup/service-state";
 
 const serverRoot = fileURLToPath(new URL("../", import.meta.url));
 const name = "integra_code_memory";
@@ -76,7 +77,7 @@ function parseJson(text: string): unknown {
   }
 }
 
-export async function installProject(root: string, client: string, write = false) {
+export async function installProject(root: string, client: string, write = false, managed = false) {
   if (!["codex", "claude", "both"].includes(client))
     throw new Error("Client must be codex, claude or both");
   const context = await createProjectContext(root);
@@ -91,11 +92,15 @@ export async function installProject(root: string, client: string, write = false
       mode: previous.mode,
     });
   };
-  const entry = resolve(serverRoot, "apps/cli/src/index.ts");
+  const entry = resolve(serverRoot, managed ? "scripts/managed-mcp.ts" : "apps/cli/src/index.ts");
   const args = [entry, "mcp", "--project", selected, "--auto-index", "--watch"];
   if (client !== "claude") {
     // Reuse the existing Codex configuration generator without writing anything.
-    const generated = (await connectCodex(selected, process.execPath, entry)).config;
+    const generated =
+      (await connectCodex(selected, process.execPath, entry)).config +
+      (managed
+        ? `\n[mcp_servers.${name}.env]\nCODEMEMORY_SERVICE_DIR = ${JSON.stringify(serviceDirectory())}\n`
+        : "");
     const expected = (parseToml(generated).mcp_servers as Record<string, Record<string, unknown>>)[
       name
     ];
@@ -120,7 +125,12 @@ export async function installProject(root: string, client: string, write = false
       if (!object(parsed) || (parsed.mcpServers !== undefined && !object(parsed.mcpServers)))
         throw new Error("Invalid .mcp.json configuration");
       const servers = (parsed.mcpServers ?? {}) as Record<string, unknown>;
-      const expected = { type: "stdio", command: process.execPath, args };
+      const expected = {
+        type: "stdio",
+        command: process.execPath,
+        args,
+        ...(managed ? { env: { CODEMEMORY_SERVICE_DIR: serviceDirectory() } } : {}),
+      };
       if (Object.hasOwn(servers, name)) {
         if (!compatible(servers[name], expected))
           throw new Error("Existing CodeMemory Claude entry conflicts; nothing was written");
@@ -173,7 +183,7 @@ export async function installProject(root: string, client: string, write = false
     applied: write,
     changedFiles: changed.map((edit) => edit.path),
     unchangedFiles: edits.filter((edit) => edit.before === edit.after).map((edit) => edit.path),
-    next: "Open this project in the selected client, approve/reload its MCP connection if prompted, then call codebase_status. PostgreSQL must be running. No database or index work was performed by this installer.",
+    next: "Open this project in the selected client, approve/reload its MCP connection if prompted, then call codebase_status. PostgreSQL must be running. Indexing starts when the client opens the connection.",
   };
 }
 if (import.meta.main) {
@@ -181,12 +191,38 @@ if (import.meta.main) {
     .description("Install CodeMemory only into an explicitly selected project")
     .requiredOption("--project <absolute-path>", "Target project; no parent/root inference")
     .requiredOption("--client <client>", "codex, claude or both")
-    .option("--write", "Apply changes (default: preview paths only)");
+    .option("--write", "Apply changes (default: preview paths only)")
+    .option(
+      "--with-services",
+      "Prepare Docker and managed PostgreSQL before writing project configuration",
+    );
   command.parse();
-  const options = command.opts<{ project: string; client: string; write?: boolean }>();
+  const options = command.opts<{
+    project: string;
+    client: string;
+    write?: boolean;
+    withServices?: boolean;
+  }>();
   try {
+    // Preflight configuration conflicts and project paths before system changes.
+    const preview = await installProject(
+      options.project,
+      options.client,
+      false,
+      options.withServices,
+    );
+    if (options.withServices && options.write) {
+      const { setupServices } = await import("./setup/services");
+      await setupServices();
+    }
     console.log(
-      JSON.stringify(await installProject(options.project, options.client, options.write), null, 2),
+      JSON.stringify(
+        options.write
+          ? await installProject(options.project, options.client, true, options.withServices)
+          : { ...preview, servicesPlanned: !!options.withServices },
+        null,
+        2,
+      ),
     );
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Installation failed");

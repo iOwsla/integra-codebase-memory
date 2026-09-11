@@ -10,9 +10,14 @@ its source checkout and is not a standalone binary.
 
 ## Prerequisites and initial setup
 
-You need Bun 1.3.3+, Git and Docker Compose. Verification covers macOS and Linux;
-Windows has not been verified. You can also use PostgreSQL with the `vector` and
-`pg_trgm` extensions instead of Docker.
+For the managed bootstrap, install Bun 1.3.3+ and Git first; the bootstrap prepares
+Docker and its dedicated PostgreSQL database. See [managed setup](installer.md#managed-docker-and-postgresql).
+Windows PowerShell installation is tested; native Windows database/runtime
+acceptance remains separate.
+
+For manual development setup below, you need Docker Compose (or PostgreSQL with
+`vector` and `pg_trgm`). This uses port 55432 and is independent of managed setup
+on port 55433.
 
 ```sh
 git clone https://github.com/iOwsla/integra-codebase-memory.git

@@ -2,7 +2,7 @@
 
 Local code intelligence and explicit project memory for MCP coding agents. Bun + TypeScript Compiler API + PostgreSQL. No telemetry, LLM inference, embeddings or external code uploads.
 
-**Development foundation (`0.1.0-alpha.13`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 14 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
+**Development foundation (`0.1.0-alpha.14`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 14 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
 
 ## Install and run
 
@@ -39,22 +39,25 @@ Only MCP requires an explicit absolute `--project`. CLI indexing accepts a posit
 With Bun and Git installed, run from any directory:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.13/bootstrap.sh | sh -s -- --project /absolute/target-project --client both --write
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.14/bootstrap.sh | sh -s -- --project /absolute/target-project --client both --write
 ```
 
 Choose `codex`, `claude` or `both`. Omit `--write` for a no-write preview.
-This downloads a pinned source release and installs its dependencies in your user
-runtime directory. PostgreSQL setup/migrations remain explicit prerequisites;
+This downloads a pinned source release, installs its dependencies, prepares
+Docker and dedicated PostgreSQL, then applies migrations. OS permissions, Docker
+first-run prompts or a Windows restart may be required. Use `--skip-services`
+for an externally prepared index database;
 see [curl setup, repeat installs and upgrades](docs/setup/installer.md#curl-bootstrap).
 
 ### Windows PowerShell
 
 ```powershell
-& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.13/bootstrap.ps1').Content)) -Project 'C:\Projects\My App' -Client both -Write
+& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.14/bootstrap.ps1').Content)) -Project 'C:\Projects\My App' -Client both -Write
 ```
 
 Works with Windows PowerShell 5.1 and PowerShell 7. Requires Bun and Git;
-PostgreSQL preparation remains explicit. See [Windows setup and script review](docs/setup/installer.md#windows-powershell).
+Docker/WSL and PostgreSQL preparation are included; use `-SkipServices` for an
+external index database. See [Windows setup and script review](docs/setup/installer.md#windows-powershell).
 
 ## Project-only installer
 

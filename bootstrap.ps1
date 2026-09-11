@@ -4,10 +4,11 @@ param(
     [Parameter(Mandatory = $true)][string]$Project,
     [Parameter(Mandatory = $true)][ValidateSet('codex', 'claude', 'both')][string]$Client,
     [string]$InstallDir,
-    [switch]$Write
+    [switch]$Write,
+    [switch]$SkipServices
 )
 $ErrorActionPreference = 'Stop'
-$version = 'v0.1.0-alpha.13'
+$version = 'v0.1.0-alpha.14'
 $repository = 'https://github.com/iOwsla/integra-codebase-memory.git'
 
 function Assert-AbsolutePath([string]$Path) {
@@ -46,7 +47,7 @@ if (-not $InstallDir) {
 Assert-AbsolutePath $InstallDir
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 if (-not $Write) {
-    Write-Output "Preview: install $version in $InstallDir and configure $Client for $Project. Add -Write to apply."
+    Write-Output "Preview: install $version in $InstallDir and configure $Client for $Project. Docker and managed PostgreSQL are prepared unless -SkipServices is selected. Add -Write to apply."
     return
 }
 foreach ($dependency in @('git', 'bun')) {
@@ -80,4 +81,4 @@ if (Test-Path -LiteralPath $InstallDir) {
         if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force }
     }
 }
-& (Join-Path $InstallDir 'install.ps1') -Project $Project -Client $Client -Write
+& (Join-Path $InstallDir 'install.ps1') -Project $Project -Client $Client -Write -WithServices:(!$SkipServices)
