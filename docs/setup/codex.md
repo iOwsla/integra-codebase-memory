@@ -1,18 +1,19 @@
-# Codex kurulumu
+# Codex setup
 
-Önce [ortak kurulumu](common.md) tamamlayın. CodeMemory kurulum klasöründe:
+Complete the [shared setup](common.md) first. From the CodeMemory installation:
 
 ```sh
 bun run connect:codex /absolute/target-project
 bun run connect:codex /absolute/target-project --write
 ```
 
-İlk komut önizleme yapar; ikincisi hedef projenin `.codex/config.toml` dosyasını
-oluşturur. Mevcut farklı ayarlar ezilmez: bu durumda önizlemedeki tabloyu mevcut
-dosyaya birleştirin. Aynı kurulum tekrar çalıştırılabilir. Üretilen dosyada makineye
-özel yollar vardır; hedef projenin Git ignore kurallarına ekleyin.
+The first command previews the configuration; the second creates the target
+project's `.codex/config.toml`. Existing differing settings are not overwritten:
+merge the previewed table into the existing file in that case. You can repeat an
+identical installation safely. The generated file contains machine-specific
+paths; add it to the target project's Git ignore rules.
 
-Manuel ayar örneği:
+Manual configuration example:
 
 ```toml
 [mcp_servers.integra_code_memory]
@@ -25,19 +26,21 @@ tool_timeout_sec = 60
 enabled = true
 ```
 
-Codex güvenilen projelerde proje kapsamlı `.codex/config.toml` dosyasını yükler.
-Bağlantı ayarı ile AI talimatları ayrı dosyalardır. Hedef proje kökündeki
-`AGENTS.md` içine [hazır bloğu](../instructions/AGENTS.md) yerleştirin. Bu deponun
-kendi AGENTS.md dosyası zaten bloğu içerir. Global kurallar başka bir sunucunun
-araçlarını zorunlu tutuyorsa bu ayrımı orada da netleştirin.
+Codex loads project-scoped `.codex/config.toml` settings for trusted projects.
+Connection settings and AI instructions are separate files. Add the
+[ready-to-copy block](../instructions/AGENTS.md) to `AGENTS.md` at the target project
+root. This repository's AGENTS.md already contains the block. If global rules
+require another server's tools, clarify the distinction there as well.
 
-Codex bağlantısını yeniden başlatın veya uygulamayı kapatıp açın; hedef projeyi
-açın. MCP listesinde `integra_code_memory` görünmesini ve [canlı sorgu
-kontrolünü](common.md#doğrulama-ve-sorun-giderme) doğrulayın. Bazı istemciler araç
-adlarına sunucu öneki ekler; talimattaki kısa adların sunucuya ait sürümünü kullanın.
+Restart the Codex connection or reopen the application, then open the target
+project. Confirm that `integra_code_memory` appears in the MCP list and perform
+the [live query check](common.md#verification-and-troubleshooting). Some clients
+prefix tool names with the server name; use the exposed version of each short
+tool name in the instructions.
 
-Kurulum komutu diğer MCP sunucularını kapatmaz, global ayarları değiştirmez ve
-çalışan sohbeti otomatik yenilemez. Bu depoda bağlantı ve doğrudan sohbetten
-`codebase_status` sorgusu doğrulanmıştır; başka makinede yeniden kontrol gerekir.
+The setup command does not disable other MCP servers, change global settings or
+automatically reload the current chat. The connection and a direct in-chat
+`codebase_status` query have been verified for this repository; verify them again
+on another machine.
 
-Kaynak: [Resmî Codex MCP yapılandırması](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+Source: [Official Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).

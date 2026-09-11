@@ -1,15 +1,16 @@
-# Ortak kurulum: CodeMemory sunucusu
+# Shared setup: the CodeMemory server
 
-CodeMemory deposu sunucunun kurulu olduğu yerdir; hedef proje ise indekslenecek
-depodur. Bunlar farklı klasörler olabilir. Komutlardaki `/absolute/...` değerlerini
-kendi tam yollarınızla değiştirin. Yerel Bun ve PostgreSQL kullanılır; API anahtarı
-gerekmez. Bu paket kaynak deposuyla çalışır, bağımsız tek dosyalık binary değildir.
+The CodeMemory repository contains the server installation; the target project
+is the repository you want to index. These can be different directories. Replace
+`/absolute/...` placeholders with your actual absolute paths. CodeMemory uses
+local Bun and PostgreSQL; it does not require an API key. This package runs from
+its source checkout and is not a standalone binary.
 
-## Ön koşullar ve ilk hazırlık
+## Prerequisites and initial setup
 
-Bun 1.3.3+, Git ve Docker Compose gerekir. macOS/Linux doğrulama kapsamındadır;
-Windows henüz doğrulanmamıştır. Docker yerine `vector` ve `pg_trgm` eklentilerini
-destekleyen PostgreSQL de kullanılabilir.
+You need Bun 1.3.3+, Git and Docker Compose. Verification covers macOS and Linux;
+Windows has not been verified. You can also use PostgreSQL with the `vector` and
+`pg_trgm` extensions instead of Docker.
 
 ```sh
 git clone https://github.com/iOwsla/integra-codebase-memory.git
@@ -19,69 +20,71 @@ docker compose up -d --wait
 bun run db:migrate
 ```
 
-Bun ve kurulum klasörünün tam yolunu öğrenin:
+Find the absolute paths to Bun and the installation directory:
 
 ```sh
 command -v bun
 pwd
 ```
 
-Migration komutu yalnızca CodeMemory'nin indeks veritabanında çalıştırılmalıdır.
-Hedef uygulamanın veritabanını `DATABASE_URL` olarak vermeyin. Varsayılan geliştirme
-veritabanı `127.0.0.1:55432` üzerindedir; kimlik bilgileri Compose dosyasındadır.
-Özel veritabanında `DATABASE_URL` değerini istemcinin ortamında sağlayın; sırları
-paylaşılan MCP ayarlarına veya talimat dosyalarına yazmayın.
+Run migrations only against CodeMemory's index database. Do not set `DATABASE_URL`
+to your target application's database. The default development database listens
+on `127.0.0.1:55432`; its credentials are defined in the Compose file. For a custom
+index database, provide `DATABASE_URL` in the client's environment. Do not write
+secrets into shared MCP settings or instruction files.
 
-MCP açılışında migration, Docker başlatma veya bağımlılık kurulumu yapılmaz.
-Makine yeniden açıldığında PostgreSQL'in çalışıyor olduğunu doğrulayın. Kaynak
-kurulumunu ve `node_modules` dizinini koruyun. Sunucunun başlangıç dosyası:
+Starting MCP does not run migrations, start Docker or install dependencies.
+After restarting your machine, verify that PostgreSQL is running. Keep the source
+checkout and its `node_modules` directory available. The server entry point is:
 `/absolute/integra-codebase-memory/apps/cli/src/index.ts`.
 
-## İstemciyi seçin
+## Choose your client
 
-- [Codex kurulumu](codex.md)
-- [Claude Code kurulumu](claude-code.md)
+- [Codex setup](codex.md)
+- [Claude Code setup](claude-code.md)
 
-Her hedef proje için ayrı bağlantı oluşturun. Global bir bağlantıya tek sabit
-proje yolu yazmak, başka projede çalışırken yanlış indeksi kullanmanıza yol açar.
-Aynı hedef için iki istemci açılırsa süreçler ayrı watcher çalıştırabilir; aynı
-indeksin yazımı kilitle sıraya alınır. Bu, ortak bir daemon değildir.
+Create a separate connection for each target project. A global connection with a
+single fixed project path can query the wrong index when you work in another
+repository. Two clients connected to the same target may run separate watchers;
+index writes are serialized with a lock. This is not a shared daemon.
 
-## Talimatları yerleştirme
+## Install the instructions
 
-[AGENTS.md şablonu](../instructions/AGENTS.md) ve
-[CLAUDE.md şablonu](../instructions/CLAUDE.md) aynı bağımsız talimat bloğunu içerir.
-Hedef dosya yoksa uygun şablonu o adla proje köküne kaydedin. Dosya zaten varsa
-`integra-code-memory:start/end` bloğunu birleştirin; proje kurallarını ezmeyin.
-Güncellemede yalnızca aynı işaretli bloğu değiştirin, ikinci kopyasını eklemeyin.
+The [AGENTS.md template](../instructions/AGENTS.md) and
+[CLAUDE.md template](../instructions/CLAUDE.md) contain the same self-contained
+instruction block. If the target file does not exist, save the appropriate
+template under that name at the project root. If it already exists, merge the
+`integra-code-memory:start/end` block without overwriting project rules. When
+updating, replace only the matching marked block rather than adding another copy.
 
-Önceki `codebase-memory-mcp` talimatları başka sunucuya aittir. İki sunucu da
-kullanılacaksa kurallarını sunucu adıyla ayırın. Bizim araçlarda bulunmayan
-`search_graph` veya `check_index_coverage` çağrılarını zorunlu tutmayın.
-Bu şablonlar AI davranışını yönlendirir; eksiksizlik veya her çağrıda uyum garantisi
-veren bir erişim kontrolü değildir.
+Older `codebase-memory-mcp` instructions belong to a different server. If you use
+both servers, distinguish their rules by server name. Do not require calls to
+`search_graph` or `check_index_coverage`, which our server does not expose.
+These templates guide AI behavior; they are not an access-control mechanism or
+a guarantee of exhaustive analysis or compliance on every call.
 
-## Doğrulama ve sorun giderme
+## Verification and troubleshooting
 
-İstemciye şunu yazın:
+Send this prompt to your client:
 
-> integra_code_memory üzerinden codebase_status çağır. Proje kökünü, indeks
-> sürümünü, bekleyen değişiklikleri ve eksiklikleri bildir. Ardından projede var
-> olan bir fonksiyonu search_symbols ile bul ve ID'siyle find_callers sorgula.
+> Call codebase_status through integra_code_memory. Report the project root,
+> index version, pending changes and any incompleteness. Then find an existing
+> project function with search_symbols and query find_callers using its ID.
 
-Beklenen: doğru kök, READY, autoIndex=true, watcher=true; bekleyen değişiklikler
-sonunda sıfırlanır. Dosya hataları ve incomplete ayrıca değerlendirilir. Boş çağıran
-listesi tek başına bağlantı hatası veya ölü kod kanıtı değildir.
+Expect the correct root, READY, autoIndex=true and watcher=true; pending changes
+should eventually reach zero. Review file errors and incomplete status separately.
+An empty caller list alone is neither a connection failure nor proof of dead code.
 
-İstemciden bağımsız protokol kontrolü (CodeMemory kurulum klasöründe):
+For a protocol check independent of the client, run from the CodeMemory installation:
 
 ```sh
 bun run verify:mcp /absolute/target-project exactDeclaredFunctionName
 ```
 
-Bu komut hedefin kalıcı indeksini oluşturur/günceller. İstemcinin kendi araç
-listesini yüklediğini tek başına kanıtlamaz. Geçici test için `simulate:project`
-kullanın. Yanlış kökte bağlantı varsa sorgulamayı durdurup ayardaki `--project`
-yolunu düzeltin. INDEX_BUSY geçiciyse bekleyin; INDEX_NOT_READY sonucunu boş liste
-saymayın. Bağlantı hatasında PostgreSQL, bağımlılıklar ve mutlak yolları kontrol
-edin. Konfigürasyon değişince istemci bağlantısını yeniden başlatın.
+This creates or updates the target's persistent index. It does not independently
+prove that your AI client has loaded its tool catalog. Use `simulate:project` for
+a disposable exercise. If the connection selects the wrong root, stop querying
+and correct the configured `--project` path. Wait for transient INDEX_BUSY states;
+do not treat INDEX_NOT_READY as an empty result. For connection failures, check
+PostgreSQL, dependencies and absolute paths. Restart the client connection after
+configuration changes.

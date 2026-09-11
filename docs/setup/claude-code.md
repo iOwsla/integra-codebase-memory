@@ -1,7 +1,7 @@
-# Claude Code kurulumu
+# Claude Code setup
 
-Önce [ortak kurulumu](common.md) tamamlayın ve Claude Code CLI'ın kurulu olduğundan
-emin olun. Aşağıdaki komutu **hedef proje klasöründe** çalıştırın:
+Complete the [shared setup](common.md) first and ensure the Claude Code CLI is
+installed. Run this command **from the target project directory**:
 
 ```sh
 cd /absolute/target-project
@@ -11,18 +11,20 @@ claude mcp add --transport stdio --scope local integra_code_memory -- \
   mcp --project /absolute/target-project --auto-index --watch
 ```
 
-`local` kapsamı bu kaydı yalnızca o proje için, kişisel Claude ayarlarında tutar.
-Makineye özel yolları diğer projelere yaymaz. Kayıt zaten varsa önce
-`claude mcp get integra_code_memory` ile inceleyin; aynı adla ikinci kayıt eklemeyin.
-Özel veritabanı kullanılacaksa Claude Code'u CodeMemory'ye ait `DATABASE_URL`
-ortamıyla başlatın. Bağlantı sırrını komut geçmişine veya ortak dosyaya yazmayın.
+The `local` scope stores this entry in your personal Claude settings for this
+project only. It does not apply machine-specific paths to other projects. If an
+entry already exists, inspect it with `claude mcp get integra_code_memory` before
+adding anything; do not create a duplicate with the same name. For a custom index
+database, start Claude Code with CodeMemory's `DATABASE_URL` in its environment.
+Do not put connection secrets in shell history or shared files.
 
-## Ekip için alternatif: .mcp.json
+## Team alternative: .mcp.json
 
-Proje kökündeki `.mcp.json` dosyasına aşağıdaki sunucu kaydı birleştirilebilir.
-Diğer `mcpServers` kayıtlarını koruyun. Bu, yukarıdaki local kurulumun alternatifidir;
-ikisini aynı adla birlikte kurmayın. Örnek yollar makineye özeldir; paylaşmadan önce
-ekibin yol/ortam stratejisini belirleyin ve sırları çıkarın.
+You can merge the following server entry into `.mcp.json` at the project root.
+Preserve other `mcpServers` entries. This is an alternative to the local setup
+above; do not configure both with the same name. The example paths are specific
+to a machine. Agree on your team's path and environment strategy and remove
+secrets before sharing the configuration.
 
 ```json
 {
@@ -40,38 +42,40 @@ ekibin yol/ortam stratejisini belirleyin ve sırları çıkarın.
 }
 ```
 
-Claude Code proje kapsamlı MCP kayıtları için güven/onay adımı gösterebilir.
-Bu onay istemci davranışıdır; bağlantının doğrulanması sırasında kontrol edin.
+Claude Code may prompt for trust or approval for project-scoped MCP entries.
+This is client behavior; check it when verifying the connection.
 
-## CLAUDE.md talimatları
+## CLAUDE.md instructions
 
-Claude Code için talimat dosyası proje kökündeki `CLAUDE.md` dosyasıdır.
-[Bağımsız hazır bloğu](../instructions/CLAUDE.md) mevcut kuralları koruyarak ekleyin.
+Claude Code's project instruction file is `CLAUDE.md` at the project root. Add the
+[self-contained block](../instructions/CLAUDE.md) while preserving existing rules.
 
-Aynı proje Codex de kullanıyorsa, AGENTS.md içine hazır bloğu koyup CLAUDE.md'de
-onu içe almak tercih edilebilir:
+If the same project also uses Codex, you can place the block in AGENTS.md and
+import it from CLAUDE.md:
 
 ```markdown
 @AGENTS.md
 ```
 
-İçe alma kullanıyorsanız aynı bloğu CLAUDE.md'ye ayrıca kopyalamayın. Bu CodeMemory
-deposu bu yöntemi kullanır; iki istemci aynı talimatı okur.
+When using the import, do not also copy the same block into CLAUDE.md. This
+CodeMemory repository uses the import so both clients read the same instructions.
 
-## Bağlantıyı doğrulama
+## Verify the connection
 
 ```sh
 claude mcp list
 claude mcp get integra_code_memory
 ```
 
-Hedef klasörde Claude Code'u başlatın/yeniden açın. `/mcp` ile sunucunun bağlantısını,
-`/context` ile CLAUDE.md talimatlarının yüklenmesini kontrol edin. Ardından
-[canlı sorgu kontrolünü](common.md#doğrulama-ve-sorun-giderme) yaptırın. Proje kökü
-ve indeks durumunu gerçek araç yanıtından görmeden çalışıyor saymayın.
+Start or reopen Claude Code in the target directory. Use `/mcp` to check the
+server connection and `/context` to check that CLAUDE.md instructions loaded.
+Then perform the [live query check](common.md#verification-and-troubleshooting).
+Do not consider the setup verified until an actual tool response confirms the
+project root and index status.
 
-Bu rehber resmî istemci belgelerine dayanır. STDIO sunucumuz gerçek SDK istemcisiyle
-test edilmiştir; bu değişiklikte Claude Code oturumunda uçtan uca kurulum çalıştırılmadı.
+This guide follows the official client documentation. Our STDIO server has been
+tested with a real SDK client; this change did not include an end-to-end setup
+run inside a Claude Code session.
 
-Kaynaklar: [Claude Code MCP](https://code.claude.com/docs/en/mcp),
-[CLAUDE.md ve AGENTS.md içe alma](https://code.claude.com/docs/en/memory).
+Sources: [Claude Code MCP](https://code.claude.com/docs/en/mcp),
+[CLAUDE.md and AGENTS.md imports](https://code.claude.com/docs/en/memory).
