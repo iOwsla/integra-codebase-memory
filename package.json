@@ -1,0 +1,43 @@
+{
+  "name": "integra-codebase-memory",
+  "version": "0.1.0-dev",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun apps/cli/src/index.ts",
+    "build": "bun build apps/cli/src/index.ts --target=bun --packages=external --outdir=dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "vitest run tests/e2e",
+    "db:migrate": "bun scripts/migrate.ts",
+    "db:status": "bun scripts/migrate.ts --status",
+    "benchmark": "bun scripts/benchmark.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "chokidar": "^5.0.0",
+    "commander": "^15.0.0",
+    "ignore": "^7.0.9",
+    "pg": "^8.23.0",
+    "picomatch": "^4.0.7",
+    "typescript": "6.0.3",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.13",
+    "@types/bun": "^1.4.2",
+    "@types/node": "22.20.2",
+    "@types/pg": "^8.23.1",
+    "@types/picomatch": "^4.0.3",
+    "vitest": "^5.0.0"
+  }
+}

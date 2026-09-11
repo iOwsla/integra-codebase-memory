@@ -1,0 +1,15 @@
+{
+  "name": "@codememory/plugin-typescript",
+  "version": "0.1.0-dev",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./process": "./src/process-plugin.ts"
+  },
+  "dependencies": {
+    "@codememory/core": "workspace:*",
+    "@codememory/shared": "workspace:*",
+    "typescript": "6.0.3"
+  }
+}

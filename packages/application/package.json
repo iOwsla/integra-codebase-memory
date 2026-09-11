@@ -1,0 +1,16 @@
+{
+  "name": "@codememory/application",
+  "version": "0.1.0-dev",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@codememory/core": "workspace:*",
+    "@codememory/graph": "workspace:*",
+    "@codememory/indexer": "workspace:*",
+    "@codememory/memory": "workspace:*",
+    "@codememory/search": "workspace:*",
+    "@codememory/shared": "workspace:*",
+    "zod": "^4.6.2"
+  }
+}

@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: codememory
+      POSTGRES_PASSWORD: local-development-only
+      POSTGRES_DB: codememory
+    ports:
+      - '127.0.0.1:55432:5432'
+    volumes:
+      - codememory-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U codememory']
+      interval: 2s
+      timeout: 2s
+      retries: 20
+volumes:
+  codememory-data:

@@ -1,0 +1,15 @@
+{
+  "name": "@codememory/mcp-server",
+  "version": "0.1.0-dev",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@codememory/application": "workspace:*",
+    "@codememory/core": "workspace:*",
+    "@codememory/indexer": "workspace:*",
+    "@codememory/memory": "workspace:*",
+    "@codememory/shared": "workspace:*",
+    "@modelcontextprotocol/server": "^2.0.0"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "@codememory/cli",
+  "version": "0.1.0-dev",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "codememory": "./src/index.ts"
+  },
+  "dependencies": {
+    "@codememory/application": "workspace:*",
+    "@codememory/core": "workspace:*",
+    "@codememory/database": "workspace:*",
+    "@codememory/indexer": "workspace:*",
+    "@codememory/mcp-server": "workspace:*",
+    "@codememory/plugin-typescript": "workspace:*",
+    "@codememory/shared": "workspace:*",
+    "commander": "^15.0.0"
+  }
+}
