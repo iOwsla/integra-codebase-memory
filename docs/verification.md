@@ -239,7 +239,7 @@ stored data. Both client configurations and the managed launcher were exercised
 with an intentionally invalid inherited application DATABASE_URL and a different
 GUI XDG_DATA_HOME. Cleanup removed only that disposable owned volume.
 
-The test suite has 106 tests in 18 files, including managed ownership/orphan
+The test suite has 107 tests in 18 files, including managed ownership/orphan
 checks, lock cleanup, remote-context rejection and per-platform orchestration.
 Linux CI repeats real service acceptance. macOS CI runs portable installer tests;
 Windows CI runs PowerShell 5.1/7 project setup and mocked WSL feature preparation

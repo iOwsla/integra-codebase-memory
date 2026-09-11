@@ -87,11 +87,12 @@ export async function ensureDocker(
       const direct = await execute([...command, "info", "--format", "{{.OSType}}"]);
       if (direct.code !== 0) command = ["sudo", ...command];
     }
-    for (let attempt = 0; attempt < 90; attempt++) {
+    const deadline = Date.now() + 180000;
+    do {
       ready = await execute([...command, "info", "--format", "{{.OSType}}"]);
       if (ready.code === 0) break;
       await Bun.sleep(2000);
-    }
+    } while (Date.now() < deadline);
   }
   if (ready.code !== 0)
     throw new Error(

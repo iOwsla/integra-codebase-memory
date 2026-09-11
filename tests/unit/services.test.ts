@@ -16,6 +16,7 @@ beforeEach(() => {
   vi.stubEnv("DOCKER_HOST", "");
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -173,4 +174,18 @@ it("generates no destructive commands or external database target", async () => 
   } finally {
     await f.dispose();
   }
+});
+
+it("bounds engine waiting by elapsed time instead of an unbounded retry duration", async () => {
+  let elapsed = 0;
+  vi.spyOn(Date, "now").mockImplementation(() => elapsed);
+  vi.stubGlobal("Bun", {
+    which: () => "docker",
+    sleep: async () => {
+      elapsed += 60000;
+    },
+  });
+  const execute = engine((c) => (c.includes("info") ? { code: 1, out: "" } : undefined));
+  await expect(ensureDocker(execute, "darwin")).rejects.toThrow("180 seconds");
+  expect(execute.mock.calls.filter(([c]) => c.includes("info")).length).toBeLessThanOrEqual(4);
 });
