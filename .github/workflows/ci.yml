@@ -16,7 +16,7 @@ jobs:
           POSTGRES_DB: codememory
         ports: ['55432:5432']
         options: >-
-          --health-cmd 'pg_isready -U codememory'
+          --health-cmd "pg_isready -U codememory"
           --health-interval 2s --health-timeout 2s --health-retries 20
     steps:
       - uses: actions/checkout@v4

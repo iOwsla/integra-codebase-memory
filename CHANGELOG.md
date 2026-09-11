@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha.2 — 2026-09-11
+
+### Fixed
+- GitHub Actions service health-check quoting now allows PostgreSQL to start on hosted runners.
+- The alpha.1 tag is retained unchanged; its release was blocked by CI before tests ran.
+
+### Included
+- Includes the project-scoped foundation and Phase 3 parser improvements described below.
+- Source prerelease; production gates and limitations remain open.
+
 ## 0.1.0-alpha.1 — 2026-09-11
 
 ### Added
