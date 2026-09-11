@@ -266,7 +266,7 @@ export class PrismaCatalog {
           ? this.groups.filter((g) =>
               g.outputs.some((output) => {
                 const path = resolve(dirname(from), module).replace(/\.[cm]?[jt]s$/, "");
-                return path === output || path === `${output}/client` || path === `${output}/index`;
+                return [output, resolve(output, "client"), resolve(output, "index")].includes(path);
               }),
             )
           : [];
