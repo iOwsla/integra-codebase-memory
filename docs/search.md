@@ -4,7 +4,8 @@ CLI and MCP index queries use the `ProjectStore.readIndex` port. PostgreSQL owns
 one read-only REPEATABLE READ transaction per request, including readiness,
 generation, diagnostic status and result data. Concurrent publication cannot mix
 generations within a response. The reader closes when its callback ends. Full
-snapshots remain available for index reconciliation, not query execution.
+snapshots remain available for inspection/offline utilities; reconciliation uses
+a compact file manifest.
 
 Symbol ranking uses exact name (100), exact qualified name (95), name prefix
 (80), name substring (65), then PostgreSQL `pg_trgm` similarity at threshold

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.0-alpha.5 — 2026-09-11
+
+### Added
+- Durable index stages and interrupted-owner detection in status/doctor; migration 4 adds latest-attempt records. Upgrade with `bun run db:migrate`.
+- Recoverable source read failures are recorded per file and retried on later indexing. Healthy files remain queryable with explicit incomplete status.
+- Recovery tests for parser errors, active database disconnects and SIGKILL; 62 tests pass locally.
+- An explicit-root, disposable-database real-project verification script and documented large-file performance limits.
+
+### Fixed
+- Lost lock-owning database connections release their pool slots without an unhandled client error.
+- Index reconciliation now reads a compact file manifest instead of transferring the full graph.
+
+### Known limitations
+- Phase 9 remains open: the full TypeScript compiler probe at a 16 MiB file limit was stopped due to local database I/O contention. This alpha does not claim stable-release readiness. See docs/verification.md and docs/hardening.md.
+
 ## 0.1.0-alpha.4 — 2026-09-11
 
 ### Added

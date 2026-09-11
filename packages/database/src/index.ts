@@ -1,7 +1,9 @@
 import type {
   IndexMetadata,
+  IndexProgress,
   IndexReader,
   IndexResult,
+  IndexState,
   MemoryEntry,
   MemorySearch,
   ProjectContext,
@@ -69,6 +71,11 @@ export class PostgresStore implements ProjectStore {
   }
   async locked<T>(c: ProjectContext, action: (store: ProjectStore) => Promise<T>): Promise<T> {
     const conn = await this.pool.connect();
+    let connectionError: Error | undefined;
+    const onError = (error: Error) => {
+      connectionError = error;
+    };
+    conn.on("error", onError);
     try {
       const lock = await conn.query(
         "SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS acquired",
@@ -81,8 +88,13 @@ export class PostgresStore implements ProjectStore {
         );
       return await action(new PostgresStore(undefined, conn, this.pool));
     } finally {
-      await conn.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [c.projectScopeId]);
-      conn.release();
+      try {
+        if (!connectionError)
+          await conn.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [c.projectScopeId]);
+      } finally {
+        conn.removeListener("error", onError);
+        conn.release(connectionError);
+      }
     }
   }
   async snapshot(c: ProjectContext): Promise<Snapshot> {
@@ -114,6 +126,35 @@ export class PostgresStore implements ProjectStore {
     } catch (e) {
       await conn.query("ROLLBACK");
       throw e;
+    } finally {
+      if (!this.connection) conn.release();
+    }
+  }
+  async indexState(c: ProjectContext): Promise<IndexState> {
+    const conn = this.connection ?? (await this.pool.connect());
+    try {
+      await conn.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      const repo = (
+        await conn.query("SELECT version,fingerprint,indexed_at FROM repositories WHERE id=$1", [
+          c.projectScopeId,
+        ])
+      ).rows[0];
+      const files = (
+        await conn.query<IndexState["files"][number]>(
+          "SELECT path,data->>'hash' AS hash,data->>'status' AS status FROM files WHERE repository_id=$1",
+          [c.projectScopeId],
+        )
+      ).rows;
+      await conn.query("COMMIT");
+      return {
+        files,
+        version: repo?.version ?? 0,
+        fingerprint: repo?.fingerprint ?? "",
+        indexedAt: repo?.indexed_at?.toISOString() ?? null,
+      };
+    } catch (error) {
+      await conn.query("ROLLBACK");
+      throw error;
     } finally {
       if (!this.connection) conn.release();
     }
@@ -222,12 +263,44 @@ export class PostgresStore implements ProjectStore {
       message.slice(0, 2000),
     ]);
   }
+  async recordIndexProgress(c: ProjectContext, progress: IndexProgress) {
+    if (!this.connection) throw new Error("Index progress requires project lock");
+    await this.query(
+      "INSERT INTO index_jobs(repository_id,backend_pid,data) VALUES($1,pg_backend_pid(),$2) ON CONFLICT(repository_id) DO UPDATE SET backend_pid=EXCLUDED.backend_pid,data=EXCLUDED.data",
+      [c.projectScopeId, JSON.stringify({ ...progress, sessionId: c.sessionId })],
+    );
+  }
   async status(c: ProjectContext) {
     const r = await this.query(
-      `SELECT version,fingerprint,indexed_at, (SELECT count(*)::int FROM files WHERE repository_id=$1) AS files,(SELECT count(*)::int FROM symbols WHERE repository_id=$1) AS symbols,(SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1) AS edges,(SELECT data FROM index_runs WHERE repository_id=$1 ORDER BY id DESC LIMIT 1) AS last_run FROM repositories WHERE id=$1`,
+      `SELECT version,fingerprint,indexed_at,
+      (version=0 OR EXISTS(SELECT 1 FROM files WHERE repository_id=$1 AND data->>'status'<>'INDEXED') OR COALESCE((SELECT jsonb_array_length(data->'diagnostics')>0 FROM index_runs WHERE repository_id=$1 ORDER BY id DESC LIMIT 1),false)) AS incomplete,
+      (SELECT coalesce(jsonb_agg(errors),'[]'::jsonb) FROM (SELECT path,data->>'error' AS error FROM files WHERE repository_id=$1 AND data->>'status'='INDEX_ERROR' ORDER BY path LIMIT 20) errors) AS "fileErrors",
+      (SELECT count(*)::int FROM files WHERE repository_id=$1) AS files,(SELECT count(*)::int FROM symbols WHERE repository_id=$1) AS symbols,(SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1) AS edges,(SELECT data FROM index_runs WHERE repository_id=$1 ORDER BY id DESC LIMIT 1) AS last_run FROM repositories WHERE id=$1`,
       [c.projectScopeId],
     );
-    return r.rows[0] ?? { version: 0 };
+    const job = (
+      await this.query(
+        `SELECT j.data,
+      EXISTS(SELECT 1 FROM pg_locks l WHERE l.pid=j.backend_pid AND l.locktype='advisory' AND l.granted
+        AND l.classid::bigint=((hashtextextended($1,0)>>32)&4294967295)
+        AND l.objid::bigint=(hashtextextended($1,0)&4294967295) AND l.objsubid=1) AS active
+      FROM index_jobs j WHERE j.repository_id=$1`,
+        [c.projectScopeId],
+      )
+    ).rows[0];
+    const interrupted = job?.data.state === "RUNNING" && !job.active;
+    return {
+      ...(r.rows[0] ?? { version: 0 }),
+      lastIndexJob: job
+        ? {
+            ...job.data,
+            interrupted,
+            recovery: interrupted
+              ? "Run index for this project to reconcile the last completed graph"
+              : undefined,
+          }
+        : null,
+    };
   }
   async saveMemory(c: ProjectContext, m: MemoryEntry, supersedes?: string) {
     const conn = await this.pool.connect();

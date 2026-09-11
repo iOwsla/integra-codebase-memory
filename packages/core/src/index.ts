@@ -92,6 +92,12 @@ export interface Snapshot extends Analysis {
   fingerprint: string;
   indexedAt: string | null;
 }
+export interface IndexState {
+  files: Pick<IndexedFile, "path" | "hash" | "status">[];
+  version: number;
+  fingerprint: string;
+  indexedAt: string | null;
+}
 export type MemoryType =
   | "FACT"
   | "DECISION"
@@ -132,6 +138,14 @@ export interface IndexResult {
   excluded: number;
   reason: string;
   indexedAt: string | null;
+}
+export interface IndexProgress {
+  state: "RUNNING" | "SUCCEEDED" | "FAILED";
+  stage: "SCANNING" | "ANALYZING" | "PUBLISHING" | "COMPLETE";
+  startedAt: string;
+  updatedAt: string;
+  error?: string;
+  version?: number;
 }
 export interface IndexMetadata {
   indexVersion: number;
@@ -178,8 +192,10 @@ export interface IndexReader {
   ): Promise<Record<string, unknown>>;
 }
 export interface ProjectStore {
+  recordIndexProgress(context: ProjectContext, progress: IndexProgress): Promise<void>;
   register(context: ProjectContext): Promise<void>;
   snapshot(context: ProjectContext): Promise<Snapshot>;
+  indexState(context: ProjectContext): Promise<IndexState>;
   readIndex<T>(
     context: ProjectContext,
     action: (reader: IndexReader, metadata: IndexMetadata) => Promise<T>,

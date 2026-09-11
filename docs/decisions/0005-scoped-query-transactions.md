@@ -26,3 +26,7 @@ full scoped snapshot. Memory reads will be addressed separately in Phase 6.
 Migration 2 adds indexes without rewriting user or indexed data. Tests exercise
 concurrent publication during a read, upgrade idempotence, a blocked query,
 foreign project IDs, literal wildcard characters and wide/cyclic graphs.
+
+Update in alpha.5: index reconciliation also stopped reading full snapshots;
+it now reads only file path/hash/status and generation metadata. Full snapshots
+remain an inspection/offline utility.

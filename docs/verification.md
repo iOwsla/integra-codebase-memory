@@ -5,8 +5,8 @@ Recorded on 2026-09-11. See the development tracker for release scope.
 - Dependency installation with Bun succeeded; versions are locked in bun.lock.
 - PostgreSQL + pgvector Compose service started healthy.
 - Tests create fresh randomly named databases and apply migrations; test databases are removed afterward.
-- Phase 6 local checks passed: `bun run lint`, `bun run typecheck`, `bun run test` (57 tests across 10 files), and `bun run build`.
-- Test split: 30 unit, 20 PostgreSQL integration, 7 real CLI/MCP E2E.
+- Phase 9 hardening increment local checks passed: `bun run lint`, `bun run typecheck`, `bun run test` (62 tests across 11 files), and `bun run build`.
+- Test split: 30 unit, 24 PostgreSQL integration, 8 real CLI/MCP E2E.
 - Parser coverage includes workspace exports/conditions, referenced custom configs, declaration output redirects, ignored/outside configuration boundaries, overloads, accessors, CommonJS and shadowed module globals. See `parser.md` for the supported scope and limits.
 - Compiled Bun entry `bun dist/index.js --help` ran successfully.
 - SDK v2 client E2E exercises tool listing, scoped structured symbol search, callers and rejection of repository ID injection.
@@ -66,3 +66,39 @@ rejection, concurrent superseding and migration 3 without row rewrites.
 A new real-CLI test exercises creation, filtering, superseding, archive and
 inactive history. The SDK MCP test also creates and filters a scoped memory
 and rejects repository-ID injection. All 57 tests passed locally.
+
+## Phase 9 recovery and real-project probe
+
+Final standalone local verification: 62 tests passed, along with lint, typecheck
+and build. This includes source-read retry, durable stages, stale-owner
+reconciliation, an actively held database connection being terminated, and a
+separate Bun lock owner killed by SIGKILL. A failing snapshot spy confirms index
+reconciliation uses the compact file manifest.
+
+The public TypeScript v6.0.3 source at commit
+`050880ce59e30b356b686bd3144efe24f875ebc8` was sparsely checked out and explicitly
+scoped to `src/compiler`, using a disposable database. With the default 2 MiB
+file limit: 77 files (one excluded), 9,400,075 total source bytes including the
+skipped file, 33,798 symbols, 177,089 edges, 4,305 unresolved references and one
+diagnostic. The response correctly reported `incomplete: true`; this is not a
+complete TypeScript-project coverage claim. Initial indexing took 77.7 s,
+unchanged reconciliation 11.9 s, first scoped symbol search 1.46 s and parent
+RSS at the end 47 MB. These timings predate the compact-manifest optimization.
+
+A second probe raised the file limit to 16 MiB. It caused substantial local
+PostgreSQL I/O contention during edge publication and was stopped before
+completion. Its verified temporary database was removed. Concurrent test
+execution was canceled and then rerun alone successfully; no result from that
+contended run is used as final verification. Full large-file compiler performance
+and total peak worker memory remain open Phase 9 work. The reproducible script
+is `scripts/verify-project.ts`; an abruptly killed script can leave a temporary
+database and should be cleaned up only after verifying its repository root.
+
+After the compact-manifest change, a separate 10,000-small-file synthetic run
+completed: initial indexing 16.2 s, unchanged check 10.2 s, symbol query 424 ms,
+parent RSS at end 54 MB. The machine had recently handled the contended probe;
+these runs are not a controlled speed comparison. The regression test proves
+that full graph snapshots are no longer read, not a specific latency improvement.
+The real CodeMemory repository also upgraded through migration 4 and indexed
+57 files at generation 62; doctor reported COMPLETE/SUCCEEDED, no interrupted
+owner and no source read errors.

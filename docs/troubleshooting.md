@@ -10,3 +10,15 @@
 - Watcher problems: check ignore/exclude rules, symlinks and nested Git boundaries. A project-local periodic reconciliation recovers missed events.
 
 Doctor is read-only. No automatic destructive repair exists.
+
+`doctor` and `status` expose `lastIndexJob`. If `interrupted` is true, rerun
+`index --project /absolute/path`; the prior graph is retained until successful
+publication. A live lock owner is not interrupted merely because an attempt is
+slow. `fileErrors` lists up to 20 recoverable source access failures; correct
+permissions or file availability, then rerun index. Failed directory/config
+reads abort the attempt instead of silently removing dependent source.
+
+Upgrade to migration 4 with `bun run db:migrate` before using durable progress.
+No memory or graph records are rewritten by this additive migration.
+Restart long-running MCP/watch sessions after upgrading so all processes use
+the same parser, schema and progress behavior.

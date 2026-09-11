@@ -38,4 +38,5 @@ CREATE INDEX memories_type_status ON memories(repository_id,(data->>'type'),(dat
 CREATE INDEX memories_scope ON memories(repository_id,(data#>>'{scope,type}'),(data#>>'{scope,target}'));
 CREATE INDEX memories_tags ON memories USING gin((data->'tags'));
 `,
+  `CREATE TABLE index_jobs(repository_id text PRIMARY KEY REFERENCES repositories(id) ON DELETE CASCADE, backend_pid integer NOT NULL, data jsonb NOT NULL);`,
 ];

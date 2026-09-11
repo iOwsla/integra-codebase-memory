@@ -73,49 +73,71 @@ export class RepositoryScanner implements FileScanner {
           excluded++;
           continue;
         }
-        const actual = await safePath(context, path);
-        const info = await lstat(actual);
         if (config) {
+          const actual = await safePath(context, path),
+            info = await lstat(actual);
           if (info.size <= 65536) configs.set(rel, await readFile(actual, "utf8"));
           continue;
         }
-        let status: IndexedFile["status"] = "INDEXED",
-          content = "",
-          contentHash = "";
-        if (info.size > context.effectiveConfig.maxFileSizeBytes) {
-          status = "SKIPPED_TOO_LARGE";
-          excluded++;
-        } else {
-          this.observe("read", actual);
-          const data = await readFile(actual);
-          if (data.includes(0)) {
-            status = "SKIPPED_BINARY";
+        try {
+          const actual = await safePath(context, path),
+            info = await lstat(actual);
+          let status: IndexedFile["status"] = "INDEXED",
+            content = "",
+            contentHash = "";
+          if (info.size > context.effectiveConfig.maxFileSizeBytes) {
+            status = "SKIPPED_TOO_LARGE";
             excluded++;
           } else {
-            content = data.toString("utf8");
-            this.observe("hash", actual);
-            contentHash = hash(data);
+            this.observe("read", actual);
+            const data = await readFile(actual);
+            if (data.includes(0)) {
+              status = "SKIPPED_BINARY";
+              excluded++;
+            } else {
+              content = data.toString("utf8");
+              this.observe("hash", actual);
+              contentHash = hash(data);
+            }
           }
+          const generated =
+            /(^|\/)(__generated__|generated)(\/|$)|\.generated\./.test(rel) ||
+            /@generated|DO NOT EDIT|auto-generated/i.test(content.slice(0, 1024));
+          if (generated && context.effectiveConfig.excludeGenerated) {
+            excluded++;
+            continue;
+          }
+          files.push({
+            id: id(context.projectScopeId, rel),
+            path: rel,
+            language: extname(rel).slice(1),
+            size: info.size,
+            modifiedAt: info.mtime.toISOString(),
+            generated,
+            status,
+            content,
+            hash: contentHash,
+            parserVersion: context.indexVersion,
+          });
+        } catch (error) {
+          const code =
+            error && typeof error === "object" && "code" in error ? String(error.code) : "";
+          if (!["EACCES", "EPERM", "ENOENT", "NOT_FOUND", "EIO", "EBUSY"].includes(code))
+            throw error;
+          files.push({
+            id: id(context.projectScopeId, rel),
+            path: rel,
+            language: extname(rel).slice(1),
+            size: 0,
+            modifiedAt: new Date(0).toISOString(),
+            generated: false,
+            status: "INDEX_ERROR",
+            content: "",
+            hash: "",
+            parserVersion: context.indexVersion,
+            error: code,
+          });
         }
-        const generated =
-          /(^|\/)(__generated__|generated)(\/|$)|\.generated\./.test(rel) ||
-          /@generated|DO NOT EDIT|auto-generated/i.test(content.slice(0, 1024));
-        if (generated && context.effectiveConfig.excludeGenerated) {
-          excluded++;
-          continue;
-        }
-        files.push({
-          id: id(context.projectScopeId, rel),
-          path: rel,
-          language: extname(rel).slice(1),
-          size: info.size,
-          modifiedAt: info.mtime.toISOString(),
-          generated,
-          status,
-          content,
-          hash: contentHash,
-          parserVersion: context.indexVersion,
-        });
       }
     };
     await walk(context.canonicalRoot, []);

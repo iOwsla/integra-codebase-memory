@@ -1,5 +1,6 @@
 import type {
   FileScanner,
+  IndexProgress,
   IndexResult,
   LanguagePlugin,
   ProjectContext,
@@ -20,70 +21,106 @@ export class IndexService {
   ) {}
   async index(force = false): Promise<IndexResult> {
     return this.store.locked(this.context, async (store) => {
-      const old = await store.snapshot(this.context);
-      const scan = await this.scanner.scan(this.context, this.plugin.configurationReferences);
-      for (const file of scan.files) file.parserVersion = this.plugin.version;
-      const fingerprint = hash(
-        JSON.stringify([
-          this.context.indexVersion,
-          this.plugin.version,
-          this.context.effectiveConfig,
-          [...scan.configs].sort(),
-        ]),
-      );
-      const before = new Map(old.files.map((f) => [f.path, f]));
-      const changed = scan.files
-        .filter(
-          (f) =>
-            force ||
-            fingerprint !== old.fingerprint ||
-            before.get(f.path)?.hash !== f.hash ||
-            before.get(f.path)?.status !== f.status,
-        )
-        .map((f) => f.path);
-      const paths = new Set(scan.files.map((f) => f.path));
-      const deleted = old.files.filter((f) => !paths.has(f.path)).map((f) => f.path);
-      if (old.version > 0 && !changed.length && !deleted.length && old.fingerprint === fingerprint)
-        return {
-          version: old.version,
-          changed: 0,
-          deleted: 0,
-          excluded: scan.excluded,
-          reason: "UNCHANGED",
-          indexedAt: old.indexedAt,
-        };
-      const reason = force
-        ? "FORCED"
-        : old.version === 0
-          ? "INITIAL"
-          : fingerprint !== old.fingerprint
-            ? "PARSER_CONFIG_SCHEMA_CHANGED"
-            : "PROJECT_SEMANTIC_REANALYSIS: dependency impact cannot yet be bounded safely";
-      const started = Date.now();
-      const analysis = await this.plugin.analyze(this.context, scan.files, scan.configs);
-      const indexedAt = new Date().toISOString();
-      const result = {
-        version: old.version + 1,
-        changed: changed.length,
-        deleted: deleted.length,
-        excluded: scan.excluded,
-        reason,
-        indexedAt,
+      const progress: IndexProgress = {
+        state: "RUNNING",
+        stage: "SCANNING",
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
-      await store.publish(
-        this.context,
-        { ...analysis, files: scan.files, version: result.version, fingerprint, indexedAt },
-        changed,
-        deleted,
-        result,
-      );
-      log("info", "index_completed", {
-        scope: this.context.projectScopeId,
-        sessionId: this.context.sessionId,
-        durationMs: Date.now() - started,
-        ...result,
-      });
-      return result;
+      const record = async () => {
+        progress.updatedAt = new Date().toISOString();
+        await store.recordIndexProgress(this.context, progress);
+      };
+      await record();
+      try {
+        const old = await store.indexState(this.context);
+        const scan = await this.scanner.scan(this.context, this.plugin.configurationReferences);
+        for (const file of scan.files) file.parserVersion = this.plugin.version;
+        const fingerprint = hash(
+          JSON.stringify([
+            this.context.indexVersion,
+            this.plugin.version,
+            this.context.effectiveConfig,
+            [...scan.configs].sort(),
+          ]),
+        );
+        const before = new Map(old.files.map((f) => [f.path, f]));
+        const changed = scan.files
+          .filter(
+            (f) =>
+              force ||
+              fingerprint !== old.fingerprint ||
+              before.get(f.path)?.hash !== f.hash ||
+              before.get(f.path)?.status !== f.status,
+          )
+          .map((f) => f.path);
+        const paths = new Set(scan.files.map((f) => f.path));
+        const deleted = old.files.filter((f) => !paths.has(f.path)).map((f) => f.path);
+        if (
+          old.version > 0 &&
+          !changed.length &&
+          !deleted.length &&
+          old.fingerprint === fingerprint
+        ) {
+          progress.state = "SUCCEEDED";
+          progress.stage = "COMPLETE";
+          progress.version = old.version;
+          await record();
+          return {
+            version: old.version,
+            changed: 0,
+            deleted: 0,
+            excluded: scan.excluded,
+            reason: "UNCHANGED",
+            indexedAt: old.indexedAt,
+          };
+        }
+        const reason = force
+          ? "FORCED"
+          : old.version === 0
+            ? "INITIAL"
+            : fingerprint !== old.fingerprint
+              ? "PARSER_CONFIG_SCHEMA_CHANGED"
+              : "PROJECT_SEMANTIC_REANALYSIS: dependency impact cannot yet be bounded safely";
+        const started = Date.now();
+        progress.stage = "ANALYZING";
+        await record();
+        const analysis = await this.plugin.analyze(this.context, scan.files, scan.configs);
+        const indexedAt = new Date().toISOString();
+        const result = {
+          version: old.version + 1,
+          changed: changed.length,
+          deleted: deleted.length,
+          excluded: scan.excluded,
+          reason,
+          indexedAt,
+        };
+        progress.stage = "PUBLISHING";
+        await record();
+        await store.publish(
+          this.context,
+          { ...analysis, files: scan.files, version: result.version, fingerprint, indexedAt },
+          changed,
+          deleted,
+          result,
+        );
+        log("info", "index_completed", {
+          scope: this.context.projectScopeId,
+          sessionId: this.context.sessionId,
+          durationMs: Date.now() - started,
+          ...result,
+        });
+        progress.state = "SUCCEEDED";
+        progress.stage = "COMPLETE";
+        progress.version = result.version;
+        await record();
+        return result;
+      } catch (error) {
+        progress.state = "FAILED";
+        progress.error = error instanceof CodeMemoryError ? error.code : "INDEX_ERROR";
+        await record().catch(() => {});
+        throw error;
+      }
     });
   }
 }

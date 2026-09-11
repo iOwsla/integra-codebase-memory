@@ -195,6 +195,56 @@ describe("real Bun CLI and MCP STDIO", () => {
       await f.dispose();
     }
   });
+  it("detects a killed indexing process and reconciles its durable progress", async () => {
+    const f = await fixture({ "main.ts": "export const retained=1" });
+    const c = await createProjectContext(f.root);
+    let child: ReturnType<typeof spawn> | undefined;
+    try {
+      expect((await cli(["index", "--project", f.root])).code).toBe(0);
+      const script = `
+        import {PostgresStore} from '@codememory/database';
+        import {createProjectContext} from '@codememory/shared';
+        const context=await createProjectContext(process.env.TEST_PROJECT_ROOT);
+        const store=new PostgresStore();
+        await store.locked(context,async(db)=>{
+          const now=new Date().toISOString();
+          await db.recordIndexProgress(context,{state:'RUNNING',stage:'ANALYZING',startedAt:now,updatedAt:now});
+          process.stdout.write('locked');
+          setInterval(()=>{},1000);
+          await new Promise(()=>{});
+        });`;
+      child = spawn("bun", ["-e", script], {
+        env: { ...process.env, DATABASE_URL: db.url, TEST_PROJECT_ROOT: f.root },
+      });
+      child.stderr?.resume();
+      let ready = false;
+      child.stdout?.on("data", () => {
+        ready = true;
+      });
+      const exited = new Promise<void>((resolve) => child?.once("exit", () => resolve()));
+      await eventually(async () => ready);
+      expect((await db.store.status(c)).lastIndexJob).toMatchObject({
+        state: "RUNNING",
+        interrupted: false,
+      });
+      child.kill("SIGKILL");
+      await exited;
+      await eventually(
+        async () =>
+          !!((await db.store.status(c)).lastIndexJob as { interrupted: boolean })?.interrupted,
+      );
+      const result = await cli(["index", "--project", f.root]);
+      expect(result.code, result.err).toBe(0);
+      expect(JSON.parse(result.out).reason).toBe("UNCHANGED");
+      expect((await db.store.status(c)).lastIndexJob).toMatchObject({
+        state: "SUCCEEDED",
+        interrupted: false,
+      });
+    } finally {
+      if (child && child.exitCode === null) child.kill("SIGKILL");
+      await f.dispose();
+    }
+  });
   it("missing project fails before database access", async () => {
     const r = await cli(["mcp", "--auto-index", "--watch"]);
     expect(r.code).toBe(1);
