@@ -19,7 +19,7 @@ export did not complete in this local investigation, including a small control
 program; those diagnostic processes were terminated.
 
 The host also showed active memory pressure: one five-second system-wide sample
-recorded roughly 80 MiB of swap-in, 104 MiB of swap-out and more than 6 GiB each of
+recorded roughly 80 MiB of swap-in, 104 MiB of swap-out and roughly 6 GiB each of
 compression/decompression activity. These counters include all applications and
 do not attribute all pressure to the parser. They make uncontrolled wall-time
 comparisons unsuitable for a speedup claim.
