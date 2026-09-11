@@ -1,7 +1,7 @@
 import { relative } from "node:path";
 import type { ProjectContext, ProjectStore } from "@codememory/core";
 import type { ProjectSession } from "@codememory/indexer";
-import { MemoryService } from "@codememory/memory";
+import { MemoryService, memorySearchSchema } from "@codememory/memory";
 import { safePath, slash } from "@codememory/shared";
 import { z } from "zod";
 
@@ -42,13 +42,7 @@ export const schemas = {
       edgeTypes: z.array(z.string().max(40)).max(20).default([]),
     })
     .strict(),
-  search_memory: z
-    .object({
-      query: z.string().max(500).default(""),
-      includeInactive: z.boolean().default(false),
-      ...paging,
-    })
-    .strict(),
+  search_memory: memorySearchSchema,
 };
 /** Shared application facade. Adapter schemas cannot supply repository IDs. */
 export class CodebaseService {
@@ -79,7 +73,7 @@ export class CodebaseService {
     }
     if (name === "search_memory") {
       const p = schemas.search_memory.parse(input);
-      return this.memory.search(p.query, p.limit, p.offset, p.includeInactive);
+      return this.memory.searchFiltered(p);
     }
     // Validate before opening a database transaction; resolve filesystem boundaries outside it.
     const p = schemas[name].parse(input);

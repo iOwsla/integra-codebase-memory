@@ -239,7 +239,11 @@ it("upgrades migration 1 without rewriting indexed data and applies migration 2 
     expect(
       (await t.db.store.pool.query("SELECT id,xmin::text FROM symbols ORDER BY id")).rows,
     ).toEqual(before.rows);
-    expect((await t.db.store.diagnostics()).migrations).toEqual([{ version: 1 }, { version: 2 }]);
+    expect((await t.db.store.diagnostics()).migrations).toEqual([
+      { version: 1 },
+      { version: 2 },
+      { version: 3 },
+    ]);
     expect((await t.service.execute("search_symbols", { query: "kept" })).results).toHaveLength(1);
   } finally {
     await t.dispose();

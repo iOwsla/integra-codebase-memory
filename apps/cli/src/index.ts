@@ -16,7 +16,8 @@ import { Command } from "commander";
 const cli = new Command()
   .name("codememory")
   .description("Local, explicitly project-scoped code intelligence")
-  .version("0.1.0-alpha.3");
+  .version("0.1.0-alpha.4");
+const collect = (value: string, previous: string[]) => [...previous, value];
 const print = (v: unknown) => process.stdout.write(`${JSON.stringify(v, null, 2)}\n`);
 async function open(project?: string) {
   const context = await createProjectContext(project ?? process.cwd());
@@ -130,6 +131,11 @@ scoped("remember", "Store an explicit project memory")
   .requiredOption("--title <title>", "Memory title")
   .requiredOption("--content <content>", "Memory content")
   .option("--type <type>", "FACT, DECISION, WARNING, NOTE, CONVENTION, INCIDENT, TODO", "NOTE")
+  .option("--scope <type>", "repository, directory, file or symbol", "repository")
+  .option("--target <target>", "Scope path or symbol ID")
+  .option("--tag <tag>", "Memory tag; repeat for multiple tags", collect, [])
+  .option("--priority <number>", "Priority 0–10", Number, 0)
+  .option("--supersedes <id>", "Replace an active same-project memory")
   .action(async (options) => {
     const app = await open(options.project);
     try {
@@ -138,6 +144,10 @@ scoped("remember", "Store an explicit project memory")
           type: options.type,
           title: options.title,
           content: options.content,
+          scope: { type: options.scope, target: options.target },
+          tags: options.tag,
+          priority: options.priority,
+          supersedes: options.supersedes,
         }),
       );
     } finally {
@@ -146,13 +156,31 @@ scoped("remember", "Store an explicit project memory")
   });
 scoped("memories [query]", "Search active project memories")
   .option("--archive <id>", "Archive a memory in this project")
-  .action(async (query: string | undefined, options: { project: string; archive?: string }) => {
+  .option("--type <type>", "Match any selected type; repeat for multiple types", collect, [])
+  .option("--tag <tag>", "Require this exact tag; repeat to require all tags", collect, [])
+  .option("--scope <type>", "Filter repository, directory, file or symbol scopes")
+  .option("--target <target>", "Exact scope path or symbol ID; requires --scope")
+  .option("--include-inactive", "Include archived and superseded records")
+  .option("--limit <number>", "Page size 1–100", Number, 20)
+  .option("--offset <number>", "Page offset 0–100000", Number, 0)
+  .action(async (query: string | undefined, options) => {
     const app = await open(options.project);
     try {
       print(
         options.archive
           ? await app.service.memory.archive(options.archive)
-          : await app.service.memory.search(query ?? ""),
+          : await app.service.execute("search_memory", {
+              query: query ?? "",
+              types: options.type,
+              tags: options.tag,
+              scope:
+                options.scope || options.target
+                  ? { type: options.scope, target: options.target }
+                  : undefined,
+              includeInactive: !!options.includeInactive,
+              limit: options.limit,
+              offset: options.offset,
+            }),
       );
     } finally {
       await app.store.close();

@@ -1,6 +1,6 @@
 # Implementation status
 
-Release: **0.1.0-alpha.3**. The supplied specifications are preserved under `docs/specifications/`; the project-isolation amendment takes precedence. This tracker distinguishes the implemented usable foundation from remaining release hardening. The alpha prerelease does not close the remaining production release gates.
+Release: **0.1.0-alpha.4**. The supplied specifications are preserved under `docs/specifications/`; the project-isolation amendment takes precedence. This tracker distinguishes the implemented usable foundation from remaining release hardening. The alpha prerelease does not close the remaining production release gates.
 
 | Phase | Status | Implementation and evidence |
 | --- | --- | --- |
@@ -10,18 +10,18 @@ Release: **0.1.0-alpha.3**. The supplied specifications are preserved under `doc
 | 3 TypeScript parser | DONE | v0.1 construct matrix, declared workspace exports/conditions, referenced custom configs, source redirects, CommonJS, accessor/overload regressions; see parser.md for evidence and explicit analysis limits |
 | 4 Index pipeline | DONE | Hash + parser/config/schema invalidation, no-op row preservation, selected-project conservative semantic re-analysis, deletion repair, atomic publication |
 | 5 Search/graph | DONE | Scoped SQL ranking/paging/snippets and bounded adjacency traversal; repeatable-read generation consistency, query timeouts and additive migration 2; see search.md |
-| 6 Memory | IN PROGRESS | Create/search/archive/supersede and scope validation implemented; additional type/tag/scope search filters remain |
+| 6 Memory | DONE | SQL-paged type/tag/scope search, canonical scope validation, atomic symbol checks, concurrent supersede and retained history; CLI/MCP acceptance tests |
 | 7 CLI | DONE | init/add/index/status/doctor/search/symbol/callers/callees/references/remember/memories/mcp/watch/clean/remove/debug |
 | 8 MCP | DONE | Official SDK v2, 12 strict tools, readiness errors, bounded outputs, parser subprocess, no model-selected repository IDs |
 | 9 Hardening | IN PROGRESS | A–J integration scenarios and real process lifecycle tests implemented; broader project/OS coverage remains |
-| 10 Documentation/release | IN PROGRESS | README, ADRs, guides, issue template, changelog, limitations; hosted CI and release gate pending |
+| 10 Documentation/release | IN PROGRESS | README, ADRs, guides, issue template, changelog, limitations; hosted Linux prerelease CI verified; stable-release hardening gates remain |
 
 ## Verification
 
 Local environment: macOS arm64, Bun 1.3.3, TypeScript Compiler API 6.0.3, MCP server/client 2.0.0, Docker PostgreSQL 17 with pgvector.
 
-Final verification results are recorded in `docs/verification.md`. Hosted Linux CI and the release workflow passed for v0.1.0-alpha.2; each subsequent release must pass its own gates.
+Final verification results are recorded in `docs/verification.md`. Hosted Linux CI and the release workflow passed for v0.1.0-alpha.3; each subsequent release must pass its own gates.
 
 ## Remaining work and next action
 
-See `docs/limitations.md` for each incomplete requirement, current implementation and recommended next action. Prioritize memory search filters and broader hardening before declaring production release readiness. Optional framework plugins, embeddings, cross-project memory and a daemon are intentionally not implemented.
+See `docs/limitations.md` for each incomplete requirement, current implementation and recommended next action. Prioritize broader hardening and real-repository acceptance before declaring production release readiness. Optional framework plugins, embeddings, cross-project memory and a daemon are intentionally not implemented.

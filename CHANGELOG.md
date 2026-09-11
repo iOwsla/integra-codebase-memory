@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.0-alpha.4 — 2026-09-11
+
+### Added
+- Phase 6: SQL-paged memory search with type, all-tags, exact-scope and inactive-history filters.
+- CLI options for scoped/tagged creation, superseding and filtered pages; MCP uses the same validated filters.
+- Migration 3 adds memory paging/filter indexes without rewriting records. Upgrade with `bun run db:migrate`; index creation can lock busy tables.
+- Memory lifecycle, concurrency, isolation, upgrade and CLI/MCP coverage (57 tests total).
+
+### Changed
+- New file/directory memory targets are validated and stored as canonical relative paths. Symbol existence is checked atomically when saving, without loading the code snapshot.
+- Repository scopes reject targets; directory/file scopes reject mismatched target types. Search remains available after source deletion and code cleanup.
+- Phase 9 hardening and the stable-release gate remain open. See docs/memory.md for filter semantics and legacy paths.
+
 ## 0.1.0-alpha.3 — 2026-09-11
 
 ### Added

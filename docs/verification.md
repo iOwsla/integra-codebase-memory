@@ -5,8 +5,8 @@ Recorded on 2026-09-11. See the development tracker for release scope.
 - Dependency installation with Bun succeeded; versions are locked in bun.lock.
 - PostgreSQL + pgvector Compose service started healthy.
 - Tests create fresh randomly named databases and apply migrations; test databases are removed afterward.
-- Phase 5 local checks passed: `bun run lint`, `bun run typecheck`, `bun run test` (51 tests across 9 files), and `bun run build`.
-- Test split: 30 unit, 15 PostgreSQL integration, 6 real CLI/MCP E2E.
+- Phase 6 local checks passed: `bun run lint`, `bun run typecheck`, `bun run test` (57 tests across 10 files), and `bun run build`.
+- Test split: 30 unit, 20 PostgreSQL integration, 7 real CLI/MCP E2E.
 - Parser coverage includes workspace exports/conditions, referenced custom configs, declaration output redirects, ignored/outside configuration boundaries, overloads, accessors, CommonJS and shadowed module globals. See `parser.md` for the supported scope and limits.
 - Compiled Bun entry `bun dist/index.js --help` ran successfully.
 - SDK v2 client E2E exercises tool listing, scoped structured symbol search, callers and rejection of repository ID injection.
@@ -56,3 +56,13 @@ The real repository was upgraded to migration 2 and indexed at generation 37
 (54 files, 15 exclusions). Compiled-CLI lexical search returned six `readIndex`
 matches from that generation; a repeated index returned `UNCHANGED` with zero
 changed/deleted files.
+
+## Phase 6 memory verification
+
+Five memory integration tests cover combined filters, literal wildcard text,
+SQL pages without snapshot reads, pre-index availability, canonical and legacy
+paths, retained memories after deletion/clean, foreign IDs, nested repository
+rejection, concurrent superseding and migration 3 without row rewrites.
+A new real-CLI test exercises creation, filtering, superseding, archive and
+inactive history. The SDK MCP test also creates and filters a scoped memory
+and rejects repository-ID injection. All 57 tests passed locally.

@@ -3,6 +3,7 @@ import type {
   IndexReader,
   IndexResult,
   MemoryEntry,
+  MemorySearch,
   ProjectContext,
   ProjectStore,
   Snapshot,
@@ -232,6 +233,14 @@ export class PostgresStore implements ProjectStore {
     const conn = await this.pool.connect();
     try {
       await conn.query("BEGIN");
+      if (m.scope.type === "symbol") {
+        const symbol = await conn.query(
+          "SELECT 1 FROM symbols WHERE repository_id=$1 AND id=$2 FOR KEY SHARE",
+          [c.projectScopeId, m.scope.target],
+        );
+        if (!symbol.rowCount)
+          throw new CodeMemoryError("NOT_FOUND", "Symbol not found in selected project");
+      }
       if (supersedes) {
         const old = await conn.query(
           "UPDATE memories SET data=data||jsonb_build_object('status','SUPERSEDED','supersededBy',$3::text,'updatedAt',$4::text) WHERE repository_id=$1 AND id=$2 AND data->>'status'='ACTIVE'",
@@ -260,6 +269,64 @@ export class PostgresStore implements ProjectStore {
         [c.projectScopeId],
       )
     ).rows.map((r) => r.data);
+  }
+  async searchMemories(c: ProjectContext, q: MemorySearch) {
+    if (
+      !Number.isInteger(q.limit) ||
+      q.limit < 1 ||
+      q.limit > 100 ||
+      !Number.isInteger(q.offset) ||
+      q.offset < 0 ||
+      q.offset > 100000
+    )
+      throw new CodeMemoryError("INVALID_PAGE", "Limit must be 1–100 and offset 0–100000");
+    const conn = await this.pool.connect();
+    try {
+      await conn.query("BEGIN READ ONLY");
+      await conn.query("SET LOCAL statement_timeout='5s'");
+      const pattern = `%${q.query.toLowerCase().replace(/[\\%_]/g, "\\$&")}%`;
+      const rows = (
+        await conn.query<{ data: MemoryEntry }>(
+          `
+        SELECT data FROM memories WHERE repository_id=$1
+          AND ($2::boolean OR data->>'status'='ACTIVE')
+          AND (cardinality($3::text[])=0 OR data->>'type'=ANY($3))
+          AND (data->'tags') @> $4::jsonb
+          AND ($5::text IS NULL OR data#>>'{scope,type}'=$5)
+          AND ($6::text[] IS NULL OR data#>>'{scope,target}'=ANY($6))
+          AND ($7='' OR lower((data->>'title') || ' ' || (data->>'content') || ' ' || array_to_string(ARRAY(SELECT jsonb_array_elements_text(data->'tags')), ' ')) LIKE $8)
+        ORDER BY data->>'createdAt' DESC, id COLLATE "C" LIMIT $9 OFFSET $10`,
+          [
+            c.projectScopeId,
+            q.includeInactive,
+            q.types,
+            JSON.stringify(q.tags),
+            q.scope?.type ?? null,
+            q.scope?.target ? (q.scopeTargets ?? [q.scope.target]) : null,
+            q.query,
+            pattern,
+            q.limit + 1,
+            q.offset,
+          ],
+        )
+      ).rows;
+      await conn.query("COMMIT");
+      return {
+        results: rows.slice(0, q.limit).map((r) => r.data),
+        hasMore: rows.length > q.limit,
+        nextOffset: q.offset + q.limit,
+      };
+    } catch (e) {
+      await conn.query("ROLLBACK");
+      if (e && typeof e === "object" && "code" in e && e.code === "57014")
+        throw new CodeMemoryError(
+          "QUERY_TIMEOUT",
+          "Memory query exceeded its execution budget; narrow the query",
+        );
+      throw e;
+    } finally {
+      conn.release();
+    }
   }
   async archiveMemory(c: ProjectContext, id: string) {
     return !!(

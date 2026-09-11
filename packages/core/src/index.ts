@@ -114,6 +114,17 @@ export interface MemoryEntry {
   updatedAt: string;
   supersededBy?: string;
 }
+export interface MemorySearch {
+  query: string;
+  types: MemoryType[];
+  tags: string[];
+  scope?: MemoryEntry["scope"];
+  /** Canonical and legacy spellings, supplied by the scoped application service. */
+  scopeTargets?: string[];
+  includeInactive: boolean;
+  limit: number;
+  offset: number;
+}
 export interface IndexResult {
   version: number;
   changed: number;
@@ -185,6 +196,10 @@ export interface ProjectStore {
   status(context: ProjectContext): Promise<Record<string, unknown>>;
   saveMemory(context: ProjectContext, memory: MemoryEntry, supersedes?: string): Promise<void>;
   memories(context: ProjectContext): Promise<MemoryEntry[]>;
+  searchMemories(
+    context: ProjectContext,
+    query: MemorySearch,
+  ): Promise<{ results: MemoryEntry[]; hasMore: boolean; nextOffset: number }>;
   archiveMemory(context: ProjectContext, id: string): Promise<boolean>;
   clean(context: ProjectContext, remove?: boolean): Promise<void>;
   diagnostics(): Promise<Record<string, unknown>>;

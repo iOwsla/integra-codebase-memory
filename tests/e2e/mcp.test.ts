@@ -90,6 +90,36 @@ describe("real Bun CLI and MCP STDIO", () => {
         arguments: { symbolId: rows[0]?.id },
       });
       expect(JSON.stringify(callers.structuredContent)).toContain("entry");
+      const remembered = await client.callTool({
+        name: "remember",
+        arguments: {
+          type: "WARNING",
+          title: "API rule",
+          content: "explicit memory",
+          tags: ["api"],
+          scope: { type: "file", target: "math.ts" },
+        },
+      });
+      expect(remembered.isError).not.toBe(true);
+      const memories = await client.callTool({
+        name: "search_memory",
+        arguments: {
+          types: ["WARNING"],
+          tags: ["api"],
+          scope: { type: "file", target: "math.ts" },
+          limit: 1,
+        },
+      });
+      expect(memories.isError).not.toBe(true);
+      expect(memories.structuredContent).toMatchObject({
+        results: [{ title: "API rule" }],
+        hasMore: false,
+      });
+      const memoryInjection = await client.callTool({
+        name: "search_memory",
+        arguments: { repositoryId: "foreign" },
+      });
+      expect(memoryInjection.isError).toBe(true);
       const injection = await client.callTool({
         name: "search_symbols",
         arguments: { query: "add", repositoryId: "foreign" },
@@ -97,6 +127,71 @@ describe("real Bun CLI and MCP STDIO", () => {
       expect(injection.isError).toBe(true);
     } finally {
       await client.close();
+      await f.dispose();
+    }
+  });
+  it("CLI stores scoped tagged memories, filters them and preserves superseded history", async () => {
+    const f = await fixture({ "src/a.ts": "export const a=1" });
+    try {
+      const created = await cli([
+        "remember",
+        "--project",
+        f.root,
+        "--title",
+        "first",
+        "--content",
+        "memory text",
+        "--scope",
+        "file",
+        "--target",
+        "src/a.ts",
+        "--tag",
+        "api",
+        "--tag",
+        "stable",
+      ]);
+      expect(created.code, created.err).toBe(0);
+      const old = JSON.parse(created.out);
+      const filtered = await cli([
+        "memories",
+        "--project",
+        f.root,
+        "--scope",
+        "file",
+        "--target",
+        "./src/a.ts",
+        "--type",
+        "NOTE",
+        "--tag",
+        "api",
+        "--tag",
+        "stable",
+        "--limit",
+        "1",
+      ]);
+      expect(filtered.code, filtered.err).toBe(0);
+      expect(JSON.parse(filtered.out)).toMatchObject({ results: [{ id: old.id }], nextOffset: 1 });
+      const replacement = await cli([
+        "remember",
+        "--project",
+        f.root,
+        "--title",
+        "next",
+        "--content",
+        "new text",
+        "--supersedes",
+        old.id,
+      ]);
+      expect(replacement.code, replacement.err).toBe(0);
+      expect(
+        (await cli(["memories", "--project", f.root, "--archive", JSON.parse(replacement.out).id]))
+          .code,
+      ).toBe(0);
+      const history = await cli(["memories", "--project", f.root, "--include-inactive"]);
+      expect(history.code, history.err).toBe(0);
+      expect(JSON.parse(history.out).results).toHaveLength(2);
+      expect((await cli(["memories", "--project", f.root, "--limit", "1x"])).code).toBe(1);
+    } finally {
       await f.dispose();
     }
   });

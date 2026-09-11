@@ -32,4 +32,10 @@ CREATE INDEX index_runs_project_latest ON index_runs(repository_id,id DESC);
 CREATE INDEX edges_in_page ON symbol_edges(repository_id,target_id,edge_type,source_id);
 CREATE INDEX edges_out_page ON symbol_edges(repository_id,source_id,edge_type,target_id);
 `,
+  `
+CREATE INDEX memories_page ON memories(repository_id,(data->>'createdAt') DESC,id);
+CREATE INDEX memories_type_status ON memories(repository_id,(data->>'type'),(data->>'status'));
+CREATE INDEX memories_scope ON memories(repository_id,(data#>>'{scope,type}'),(data#>>'{scope,target}'));
+CREATE INDEX memories_tags ON memories USING gin((data->'tags'));
+`,
 ];
