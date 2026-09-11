@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.17 — 2026-09-12
+
+- Add stable shared CLI/MCP dispatchers and one-command published-release updates across registered projects, with version checks, preflight, backups and retained old runtimes.
+- Redirect backed-up legacy entry scripts in managed release folders so cached client commands cannot restart the retired engine.
+- Migrate registered project connections during a one-time bootstrap upgrade; stop only verified CodeMemory MCP processes and matched parser workers with process identity revalidation. Preserve project scope and avoid bulk indexing.
+- Fix advisory unlock attempts by non-owners, add contention backoff and distinguish BUSY from ERROR. Mark known stale query results incomplete and report the served generation.
+- Add two-project upgrade/process-isolation acceptance checks on native Windows/macOS/Linux and database lock/staleness regressions. Open clients still require reconnecting after upgrade.
+
 ## 0.1.0-alpha.16 — 2026-09-12
 
 - Report syntax diagnostic kind/code and one-based line/column, bounded diagnostic pages, affected-file totals and explicit incomplete reasons. Split exclusion counts by file/directory/reason; retain valid-file queries when other files have syntax errors.

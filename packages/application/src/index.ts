@@ -106,7 +106,9 @@ export class CodebaseService {
       const actual = await safePath(this.context, p.path);
       path = slash(relative(this.context.canonicalRoot, actual));
     }
-    const pendingChanges = this.session ? (await this.session.status()).pendingChanges : 0;
+    const sessionStatus = this.session ? await this.session.status() : undefined;
+    const pendingChanges = sessionStatus?.pendingChanges ?? 0;
+    const updating = sessionStatus?.freshness === "UPDATING";
     return this.store.readIndex(this.context, async (reader, metadata) => {
       let data: Record<string, unknown>;
       switch (name) {
@@ -163,7 +165,15 @@ export class CodebaseService {
           break;
         }
       }
-      return { ...metadata, pendingChanges, ...data };
+      return {
+        ...metadata,
+        pendingChanges,
+        ...data,
+        servedFromVersion: metadata.indexVersion,
+        ...(updating
+          ? { incomplete: true, freshness: "UPDATING", staleSince: sessionStatus?.staleSince }
+          : {}),
+      };
     });
   }
 }

@@ -25,7 +25,7 @@ import { databaseUrl, readService } from "../../../scripts/setup/service-state";
 const cli = new Command()
   .name("codememory")
   .description("Local, explicitly project-scoped code intelligence")
-  .version("0.1.0-alpha.16");
+  .version("0.1.0-alpha.17");
 registerManagementCommands(cli);
 cli
   .command("updates")
@@ -353,7 +353,7 @@ scoped("watch [path]", "Watch selected project until SIGINT or SIGTERM").action(
 );
 cli.parseAsync().catch((error) => {
   process.stderr.write(
-    `${JSON.stringify(publicError(["system", "projects", "updates"].includes(process.argv[2] ?? "") ? managementError(error) : error))}\n`,
+    `${JSON.stringify(publicError(["system", "projects", "updates", "update"].includes(process.argv[2] ?? "") ? managementError(error) : error))}\n`,
   );
   if (process.env.CODEMEMORY_DEBUG === "1") process.stderr.write(`${String(error)}\n`);
   process.exitCode = 1;

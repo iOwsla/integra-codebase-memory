@@ -6,7 +6,12 @@ import { ProcessTypeScriptPlugin } from "@codememory/plugin-typescript/process";
 import { createProjectContext } from "@codememory/shared";
 import type { Command } from "commander";
 import { installProject } from "../install-project";
-import { installManagementCli, listRegistrations, saveRegistration } from "./cli-state";
+import {
+  activeRuntime,
+  installManagementCli,
+  listRegistrations,
+  saveRegistration,
+} from "./cli-state";
 import { CliProgress } from "./progress";
 import { databaseUrl, readService } from "./service-state";
 import { dockerExecutable, run, setupServices } from "./services";
@@ -31,6 +36,16 @@ async function indexProject(root: string, managed: boolean) {
   }
 }
 export function registerManagementCommands(cli: Command) {
+  cli
+    .command("update")
+    .description(
+      "Install a published release once, migrate registered projects and stop their old MCP processes",
+    )
+    .option("--version <version>", "Select a published version; downgrades are refused")
+    .action(async (options) => {
+      const { updateRuntime } = await import("./update");
+      print(await updateRuntime(options.version));
+    });
   // Management is available without opening a database or registering the current directory.
   const system = cli
     .command("system")
@@ -48,6 +63,7 @@ export function registerManagementCommands(cli: Command) {
       ...state,
       dockerReady: docker.code === 0 && docker.out.trim() === "linux",
       projects: await listRegistrations(),
+      activeRuntime: await activeRuntime().catch(() => null),
       next: "Use system setup --project <path> to prepare services and resume the selected project.",
     });
   });
@@ -91,6 +107,7 @@ export function registerManagementCommands(cli: Command) {
     .command("add [path]")
     .requiredOption("--client <client>", "codex, claude or both")
     .option("--external-db", "Use the caller's DATABASE_URL instead of managed PostgreSQL")
+    .option("--upgrade", "Retarget this registered project to the shared launcher")
     .option("--no-index", "Register/configure now; defer indexing until services are ready")
     .action(async (path, options) => {
       const preview = await installProject(
@@ -98,6 +115,7 @@ export function registerManagementCommands(cli: Command) {
         options.client,
         false,
         !options.externalDb,
+        !!options.upgrade,
       );
       await saveRegistration({
         root: preview.projectRoot,
@@ -105,7 +123,16 @@ export function registerManagementCommands(cli: Command) {
         managed: !options.externalDb,
         enabled: true,
       });
-      print(await installProject(preview.projectRoot, options.client, true, !options.externalDb));
+      await installManagementCli();
+      print(
+        await installProject(
+          preview.projectRoot,
+          options.client,
+          true,
+          !options.externalDb,
+          !!options.upgrade,
+        ),
+      );
       if (options.index)
         await indexProject(preview.projectRoot, !options.externalDb).then(print, () => {
           throw new Error(

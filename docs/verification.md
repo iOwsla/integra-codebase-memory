@@ -285,3 +285,29 @@ These are fixture-level checks. The reported large Windows repository completion
 and interactive latency remain user-reported observations, not local reproduction
 or concurrent-load acceptance. Automatic stale-process retirement, release-folder
 cleanup and full large-repository lifecycle testing remain open.
+
+## Alpha.17 shared updates and lock contention (2026-09-12)
+
+Local macOS verification passed lint, typecheck, CLI build and the full suite:
+143 tests across 26 files. Database tests use fresh disposable databases.
+
+The native upgrade acceptance script creates two registered project fixtures,
+legacy MCP processes and an unrelated Bun process. It verifies that conflicting
+settings reject activation without changing the first project or stopping any
+process. Successful activation migrates both projects, preserves unrelated
+settings/processes, selects the new version through the shared launcher and is
+repeatable. Cached legacy commands resolve to the active version; originals are
+retained in the private rollback backup. An invalid database URL verifies this
+flow does not depend on database provisioning or indexing.
+
+PostgreSQL regressions verify failed lock acquisition emits no non-owner unlock
+notice and cannot release another session's lock. Contention uses bounded retry
+backoff, reports BUSY, and recovers after lock release. Queries mark known stale
+generations incomplete during pending/active work, including reads from a separate
+CLI connection, then clear the stale flag after publication.
+
+Native Windows process retirement and PowerShell 5.1/7 installers, macOS installer
+tests and the Linux full suite are required hosted gates for this release. Local
+macOS results do not establish Windows acceptance. Full large-monorepo concurrent
+lifecycle testing, release-folder garbage collection and graph/Prisma field-report
+items remain open; see [field feedback](field-feedback.md).

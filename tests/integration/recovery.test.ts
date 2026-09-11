@@ -172,3 +172,81 @@ it("survives loss of the lock-owning connection during analysis and releases its
     await f.dispose();
   }
 });
+
+it("contenders never unlock another connection's lock or emit ownership warnings", async () => {
+  const db = await testDatabase(),
+    f = await fixture({ "main.ts": "export const one=1;" });
+  const notices: string[] = [];
+  db.store.pool.on("connect", (client) =>
+    client.on("notice", (notice) => notices.push(notice.message ?? "")),
+  );
+  try {
+    const c = await createProjectContext(f.root);
+    await db.store.register(c);
+    await db.store.locked(c, async () => {
+      for (let i = 0; i < 3; i++)
+        await expect(db.store.locked(c, async () => {})).rejects.toMatchObject({
+          code: "INDEX_BUSY",
+        });
+    });
+    expect(notices.filter((message) => message.includes("don't own a lock"))).toEqual([]);
+    await db.store.locked(c, async () => {});
+  } finally {
+    await db.dispose();
+    await f.dispose();
+  }
+});
+
+it("backs off busy sessions and marks old-generation empty results incomplete", async () => {
+  const { ProjectSession } = await import("@codememory/indexer");
+  const { eventually } = await import("@codememory/test-utils");
+  const db = await testDatabase(),
+    f = await fixture({ "main.ts": "export const existing=1;" });
+  const c = await createProjectContext(f.root);
+  await db.store.register(c);
+  const index = new IndexService(c, db.store, new RepositoryScanner(), new TypeScriptPlugin());
+  await index.index();
+  const calls = vi.spyOn(index, "index");
+  const session = new ProjectSession(c, db.store, index, true, false);
+  try {
+    await writeFile(resolve(f.root, "new.ts"), "export const freshSymbol=2;");
+    await db.store.locked(c, async (store) => {
+      await store.recordIndexProgress(c, {
+        state: "RUNNING",
+        stage: "SCANNING",
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      await session.start();
+      await eventually(async () => (await session.status()).state === "BUSY");
+      expect(await session.status()).toMatchObject({
+        state: "BUSY",
+        incomplete: true,
+        freshness: "UPDATING",
+      });
+      for (const service of [
+        new CodebaseService(c, db.store, session),
+        new CodebaseService(c, db.store),
+      ])
+        expect(await service.execute("search_symbols", { query: "freshSymbol" })).toMatchObject({
+          results: [],
+          incomplete: true,
+          freshness: "UPDATING",
+          servedFromVersion: 1,
+        });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      expect(calls.mock.calls.length).toBeLessThanOrEqual(2);
+    });
+    await eventually(async () => (await session.status()).state === "READY", 10000);
+    expect(
+      await new CodebaseService(c, db.store, session).execute("search_symbols", {
+        query: "freshSymbol",
+      }),
+    ).toMatchObject({ incomplete: false, results: [{ name: "freshSymbol" }] });
+  } finally {
+    calls.mockRestore();
+    await session.close();
+    await db.dispose();
+    await f.dispose();
+  }
+});

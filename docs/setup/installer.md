@@ -99,27 +99,30 @@ It does not index any repository; that starts when the client opens its connecti
 Pass `--skip-services` to keep using an externally prepared index database.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.16/bootstrap.sh | sh -s -- --project /absolute/target-project --client both --write
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.17/bootstrap.sh | sh -s -- --project /absolute/target-project --client both --write
 ```
 
 For inspection before execution, download with `curl -fLo bootstrap.sh` using the
 same URL, review the file, then run `sh bootstrap.sh` with the same arguments.
 Omit `--write` to preview without downloading or creating files.
 
-Default runtime: `$XDG_DATA_HOME/integra-code-memory/releases/v0.1.0-alpha.16`,
-or `$HOME/.local/share/integra-code-memory/releases/v0.1.0-alpha.16`. Override with
-`--install-dir /absolute/runtime`. Keep this directory: client configuration points
-to it. Repeating the command reuses a clean checkout with the expected origin and
+Default runtime: `$XDG_DATA_HOME/integra-code-memory/releases/v0.1.0-alpha.17`,
+or `$HOME/.local/share/integra-code-memory/releases/v0.1.0-alpha.17`. Override with
+`--install-dir /absolute/runtime`. Keep the active runtime directory: the shared
+launcher selects it through the private active-runtime pointer. Client settings
+refer to the shared launcher. Repeating the command reuses a clean checkout with the expected origin and
 tag; it refuses other existing directories and modified checkouts. Downloads use
 a temporary directory, removed on failure. If project configuration conflicts,
 the downloaded runtime remains available while project changes are rejected by
 the project installer.
 
-Upgrades are explicit: install the next pinned release into its own directory and
-pass `--upgrade` / `-Upgrade` together with the write flag. Recognizable same-project
-Bun MCP entries are retargeted after backups are saved outside the repository;
-other servers and custom settings are preserved. The output includes
-`backupDirectory`. Database mode is retained: alpha.13 and external-database
+From alpha.17 onward, run `codememory update` (`codememory.cmd update` on Windows)
+once to update the shared runtime. For the first migration from older releases,
+install the next pinned release into its own directory and pass `--upgrade` /
+`-Upgrade` together with the write flag. Existing enabled registered projects are
+preflighted together and recognizable Bun MCP entries are retargeted after backups
+are saved outside the repositories. Other servers and custom settings are preserved.
+The shared update output includes `backupDirectory`. Database mode is retained: alpha.13 and external-database
 installations need `--skip-services` / `-SkipServices`. Custom commands/arguments,
 ambiguous TOML and different project roots are refused before project writes.
 See [complete upgrade commands and rollback](../../README.md#update-an-existing-installation).
@@ -131,11 +134,11 @@ Use Windows PowerShell 5.1 or PowerShell 7 on Windows with Bun 1.3.3+ and Git
 installed. Run this in PowerShell, replacing the project path:
 
 ```powershell
-& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.16/bootstrap.ps1').Content)) -Project 'C:\Projects\My App' -Client both -Write
+& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.17/bootstrap.ps1').Content)) -Project 'C:\Projects\My App' -Client both -Write
 ```
 
 Choose `codex`, `claude` or `both`. Omit `-Write` for a no-write preview.
-The runtime defaults to `%LOCALAPPDATA%\integra-code-memory\releases\v0.1.0-alpha.16`;
+The runtime defaults to `%LOCALAPPDATA%\integra-code-memory\releases\v0.1.0-alpha.17`;
 use `-InstallDir 'D:\Tools\CodeMemory'` to choose another location. Drive-relative
 paths are rejected. Runtime junctions and symbolic links are rejected.
 Bash is not required. Docker/WSL preparation may request administrator permission
@@ -146,7 +149,7 @@ never scans other projects or changes global client configuration.
 For review before execution, download the script and run it in a child process:
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.16/bootstrap.ps1' -OutFile bootstrap.ps1
+Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.17/bootstrap.ps1' -OutFile bootstrap.ps1
 Get-Content .\bootstrap.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Project 'C:\Projects\My App' -Client both -Write
 ```

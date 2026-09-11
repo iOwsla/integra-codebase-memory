@@ -129,8 +129,7 @@ Close/reconnect the relevant Codex/Claude project connection after an upgrade,
 then verify `runtime.version`. An old running process continues its loaded code
 until its client disconnects. Installers verify the new executable/entry paths
 before rewriting settings and preserve old release folders for rollback.
-There is no automatic process killer, global daemon or release-directory garbage
-collector. `projects remove --yes` disables a registry entry; it does not uninstall
+Alpha.17 stops verified registered-project MCP processes during an explicit update. There is no global daemon or release-directory garbage collector. `projects remove --yes` disables a registry entry; it does not uninstall
 client settings, kill clients or delete source/database data.
 
 CLI/MCP public failures include `diagnosticId`; find the matching
@@ -138,3 +137,66 @@ CLI/MCP public failures include `diagnosticId`; find the matching
 the public error code and runtime identity, not arbitrary exception text or
 credentials. Keep the command, project status and matching event when reporting
 an issue. Full private exception dumps are not automatically persisted.
+
+
+## Shared runtime updates
+
+The private `cli/active.json` selects one runtime. Stable `cli/mcp.ts` and
+`cli/managed-mcp.ts` dispatch to it; the user-local CLI uses the same dispatcher.
+Project/client registrations retain their own root, enabled flag and database
+mode. A new CLI invocation or MCP connection reads the shared target.
+
+`codememory update` installs the newest published compatible release once for
+the registry. `--version vX.Y.Z-alpha.N` selects an explicit published release;
+automatic downgrades are refused. Downloads use the fixed public repository,
+frozen dependencies and no package lifecycle scripts. Version, tag, clean checkout
+and CLI startup are checked before activation. `codememory updates` remains
+check-only; assistants should ask before invoking `update`. There is no unattended
+timer or silent background installation.
+
+Activation checks every existing registered project's recognizable connection
+before any process is stopped, then writes backups and shared launchers, migrates
+settings and switches the active pointer last. It preserves custom environment,
+timeouts and other servers. Existing runtimes are kept for recovery. A handled
+activation failure restores completed installer-owned writes when they have not
+been edited concurrently. `backupDirectory/rollback.json` records the original
+settings; per-project backup directories are also returned. Do not publish these
+private backups because client configuration can contain credentials.
+
+If activation is interrupted by a power loss or process termination, rerun the
+bootstrap with `--upgrade` / `-Upgrade`. A lock owned by a dead PID is recoverable;
+a live updater blocks concurrent activation. During activation, new shared
+launchers refuse to start. If the first migration stops before an active pointer
+exists, invoke the downloaded bootstrap rather than the shared CLI to repair it.
+The CLI's normal exit must be observed before starting another update.
+
+Only Bun MCP commands with a registered exact project root, recognized entry,
+verified CodeMemory runtime origin/manifest and matching process creation identity
+are eligible for automatic stop. Parser workers require a matched parent and entry.
+The updater rechecks identities before termination; it never kills every Bun/Node
+process or treats a PostgreSQL backend PID as an operating-system process ID.
+Unix uses TERM followed by KILL for processes that remain; Windows terminates the
+verified process. Uncommitted PostgreSQL transactions roll back on disconnect.
+Foreground manual indexing or customized/unregistered launchers may require closing
+that specific terminal/client first.
+
+Reconnect open clients after success: the updater cannot force an editor to reload
+its cached MCP launch arguments. A client that keeps respawning a legacy cached
+command must be closed/reopened. The updater does not delete databases, restart
+PostgreSQL, or index registered projects. Alpha.17 needs no schema migration;
+future schema changes must use the documented `system setup` migration flow
+before expecting the new runtime to query that database.
+
+`BUSY` means another writer holds the project lock, not a parser failure. MCP retry
+delay backs off to 30 seconds. Queries served while changes or a running/interrupted
+job are known use `freshness: UPDATING`, `incomplete: true`, `servedFromVersion`
+and `staleSince`; these indicate an older published graph, not proof that a missing
+symbol does not exist. Only the lock owner attempts to release its PostgreSQL lock.
+
+Legacy entry scripts inside the managed releases directory are redirected to the
+shared dispatcher after their original contents are backed up. This prevents cached
+old client commands from restarting an outdated engine. The remaining release
+files are retained; a retired release checkout contains these intentional local
+changes. Original entry scripts are in the first activation backup's
+`rollback.json`. Source checkouts/custom locations outside managed releases are
+not rewritten. Disabled registrations are skipped, not re-enabled by an update.

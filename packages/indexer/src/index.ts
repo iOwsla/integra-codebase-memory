@@ -138,6 +138,9 @@ export class ProjectSession {
   private closing = false;
   private pending = new Set<string>();
   private lastError?: string;
+  private busyAttempts = 0;
+  private retryNotBefore = 0;
+  private staleSince?: string;
   private lastErrorMessage?: string;
   private lastResult?: IndexResult;
   private stopped?: Promise<void>;
@@ -175,11 +178,15 @@ export class ProjectSession {
   private schedule(path: string, delay = this.context.effectiveConfig.debounceMs) {
     if (this.closing) return;
     this.pending.add(path);
+    this.staleSince ??= new Date().toISOString();
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => {
-      this.timer = undefined;
-      void this.drain();
-    }, delay);
+    this.timer = setTimeout(
+      () => {
+        this.timer = undefined;
+        void this.drain();
+      },
+      Math.max(delay, this.retryNotBefore - Date.now()),
+    );
   }
   private async drain() {
     if (this.closing || this.running) return;
@@ -189,24 +196,38 @@ export class ProjectSession {
         this.lastResult = await this.indexer.index();
         this.lastError = undefined;
         this.lastErrorMessage = undefined;
+        this.busyAttempts = 0;
+        this.retryNotBefore = 0;
+        if (!this.pending.size) this.staleSince = undefined;
       } catch (e) {
         this.lastErrorMessage =
           e instanceof CodeMemoryError && e.code === "PARSER_ERROR" ? e.message : undefined;
         this.lastError = e instanceof CodeMemoryError ? e.code : "INDEX_ERROR";
-        if (this.lastError === "INDEX_BUSY") this.schedule("lock-retry", 500);
-        else await this.store.recordFailure(this.context, this.lastError).catch(() => {});
+        if (this.lastError === "INDEX_BUSY") {
+          const delay = Math.min(30000, 1000 * 2 ** Math.min(this.busyAttempts++, 5));
+          this.retryNotBefore = Date.now() + delay;
+          this.schedule("lock-retry", delay);
+        } else await this.store.recordFailure(this.context, this.lastError).catch(() => {});
       }
     })();
     try {
       await this.running;
     } finally {
       this.running = undefined;
-      if (this.pending.size && !this.closing) this.schedule("queued");
+      if (this.pending.size && !this.closing && !this.timer) this.schedule("queued");
     }
   }
   async status(options?: StatusOptions) {
     const persisted = await this.store.status(this.context, options);
+    const job = persisted.lastIndexJob as
+      | { state?: string; lockActive?: boolean; sessionId?: string; startedAt?: string }
+      | undefined;
+    const externalJob =
+      job?.state === "RUNNING" && job.lockActive && job.sessionId !== this.context.sessionId;
+    const busy = this.lastError === "INDEX_BUSY" || !!externalJob;
+    const updating = !!this.running || this.pending.size > 0 || job?.state === "RUNNING";
     return {
+      ...persisted,
       projectRoot: this.context.canonicalRoot,
       projectScopeId: this.context.projectScopeId,
       projectSource: "explicit --project",
@@ -214,27 +235,26 @@ export class ProjectSession {
       watcher: !!this.watcher && !this.closing,
       state: this.running
         ? "INDEXING"
-        : this.lastError
-          ? "ERROR"
-          : persisted.version
-            ? "READY"
-            : "NEW",
+        : busy
+          ? "BUSY"
+          : this.lastError
+            ? "ERROR"
+            : persisted.version
+              ? "READY"
+              : "NEW",
       pendingChanges: this.pending.size,
       indexVersion: persisted.version ?? 0,
+      servedFromVersion: persisted.version ?? 0,
       indexedAt: persisted.indexed_at ?? null,
-      freshness:
-        this.running || this.pending.size
-          ? "UPDATING"
-          : persisted.version
-            ? "LAST_COMPLETED"
-            : "NOT_READY",
-      incomplete: !persisted.version,
+      freshness: updating ? "UPDATING" : persisted.version ? "LAST_COMPLETED" : "NOT_READY",
+      incomplete: !!persisted.incomplete || updating,
+      staleSince: updating ? (this.staleSince ?? job?.startedAt ?? null) : null,
       excludedFiles: (persisted.last_run as IndexResult | undefined)?.excluded ?? 0,
-      error: this.lastError,
+      error: busy ? undefined : this.lastError,
+      retryAfterMs: busy ? Math.max(0, this.retryNotBefore - Date.now()) : undefined,
       errorMessage: this.lastErrorMessage,
       lastReanalysisReason:
         this.lastResult?.reason ?? (persisted.last_run as IndexResult | undefined)?.reason,
-      ...persisted,
     };
   }
   async close() {

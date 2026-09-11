@@ -271,7 +271,7 @@ it("upgrades recognizable connections with backups while preserving unrelated se
     const oldEntry = resolve(f.root, "old-release/apps/cli/src/index.ts");
     const originalCodex = await readFile(codexPath, "utf8");
     const oldCodex = `${originalCodex.replace(
-      JSON.stringify(resolve("apps/cli/src/index.ts")),
+      JSON.stringify(resolve(f.root, "state/integra-code-memory/cli/mcp.ts")),
       JSON.stringify(oldEntry),
     )}\n[mcp_servers.other]\ncommand = "keep-me"\n`;
     const oldClaude = JSON.parse(await readFile(claudePath, "utf8"));
@@ -293,7 +293,9 @@ it("upgrades recognizable connections with backups while preserving unrelated se
     );
     expect(await readFile(codexPath, "utf8")).toContain('command = "keep-me"');
     const now = JSON.parse(await readFile(claudePath, "utf8"));
-    expect(now.mcpServers.integra_code_memory.args[0]).toBe(resolve("apps/cli/src/index.ts"));
+    expect(now.mcpServers.integra_code_memory.args[0]).toBe(
+      resolve(f.root, "state/integra-code-memory/cli/mcp.ts"),
+    );
     expect(now.mcpServers.integra_code_memory.env).toEqual(
       oldClaude.mcpServers.integra_code_memory.env,
     );

@@ -7,6 +7,7 @@ import {
   installManagementCli,
   listRegistrations,
   saveRegistration,
+  sharedEntry,
 } from "../../scripts/setup/cli-state";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -16,7 +17,7 @@ it("installs CLI and persists selected registrations before database provisionin
     vi.stubEnv("XDG_DATA_HOME", f.root);
     vi.stubEnv("LOCALAPPDATA", f.root);
     const cli = await installManagementCli();
-    expect(await readFile(cli.executable, "utf8")).toContain("apps/cli/src/index.ts");
+    expect(await readFile(cli.executable, "utf8")).toContain(sharedEntry());
     expect(await listRegistrations()).toEqual([]);
     const entry = {
       root: resolve(f.root, "selected"),

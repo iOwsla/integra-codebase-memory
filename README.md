@@ -2,7 +2,7 @@
 
 Local code intelligence and explicit project memory for MCP coding agents. Bun + TypeScript Compiler API + PostgreSQL. No telemetry, LLM inference, embeddings or external code uploads.
 
-**Development foundation (`0.1.0-alpha.16`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 14 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
+**Development foundation (`0.1.0-alpha.17`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 14 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
 
 Management commands and reboot recovery: [CLI guide](docs/installation.md). Large project parser settings: [indexing guide](docs/indexing.md).
 
@@ -13,14 +13,14 @@ Open a terminal **inside the project you want to index**. Install Bun 1.3.3+ and
 ### macOS and Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.16/bootstrap.sh | sh -s -- --project "$PWD" --client both --write
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.17/bootstrap.sh | sh -s -- --project "$PWD" --client both --write
 export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/integra-code-memory/cli/bin:$PATH"
 ```
 
 ### Windows PowerShell 5.1 or 7
 
 ```powershell
-$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.16/bootstrap.ps1').Content
+$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.17/bootstrap.ps1').Content
 & ([scriptblock]::Create($installer)) -Project (Get-Location).Path -Client both -Write
 $env:Path = "$env:LOCALAPPDATA\integra-code-memory\cli\bin;$env:Path"
 ```
@@ -40,32 +40,58 @@ On Windows use `codememory system setup --project (Get-Location).Path` from the 
 
 ## Update an existing installation
 
-**Close this project's running MCP connection before updating.** `codememory updates` only checks releases; it does not install them. Run the following from the project directory to install the pinned release and update only that project's connection. Repeat for each project you choose to upgrade; other project connections retain their existing runtime.
-
-### Windows: upgrade from alpha.13 or an external database
+Starting with alpha.17, the CLI and registered projects use stable launchers in
+the shared user installation. Update once from any directory:
 
 ```powershell
-$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.16/bootstrap.ps1').Content
-& ([scriptblock]::Create($installer)) -Project (Get-Location).Path -Client both -Upgrade -SkipServices -Write
-$env:Path = "$env:LOCALAPPDATA\integra-code-memory\cli\bin;$env:Path"
-codememory --version
+codememory.cmd update
 ```
 
-For an **alpha.14/alpha.15 managed Docker/PostgreSQL installation**, omit `-SkipServices`. Keep the same client choice you originally installed. `-SkipServices` preserves an external database connection; it does not migrate that database.
+Use `codememory update` on macOS/Linux. `codememory updates` only checks for a
+release. `update` downloads a published release, validates it, preflights existing
+enabled registered projects, backs up changed settings, stops verified CodeMemory MCP
+processes for those projects, and switches the shared active runtime. It does not
+index every project, delete databases, remove old release folders or install in
+the background. Reconnect open Codex/Claude MCP connections afterward.
 
-### macOS and Linux
+### One-time migration from alpha.16 or older
+
+Run this once from **one registered project**, keeping that project's original
+client and database mode. Other existing registered projects are migrated using
+their own saved settings. Conflicting configurations stop the upgrade before
+process termination; unrelated client settings are preserved.
+
+Windows, for a managed Docker/PostgreSQL installation:
+
+```powershell
+$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.17/bootstrap.ps1').Content
+& ([scriptblock]::Create($installer)) -Project (Get-Location).Path -Client both -Upgrade -Write
+$env:Path = "$env:LOCALAPPDATA\integra-code-memory\cli\bin;$env:Path"
+codememory.cmd --version
+codememory.cmd system status
+```
+
+For an **external database / alpha.13 installation**, add `-SkipServices`.
+The selected database mode cannot silently change during migration.
+
+macOS/Linux, managed installation:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.16/bootstrap.sh | sh -s -- --project "$PWD" --client both --upgrade --write
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.17/bootstrap.sh | sh -s -- --project "$PWD" --client both --upgrade --write
 export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/integra-code-memory/cli/bin:$PATH"
 codememory --version
 ```
 
-Add `--skip-services` when upgrading alpha.13 or another external-database installation. An upgrade cannot silently change between managed and external database modes.
+Add `--skip-services` for an external database. Omit the write flag to preview the
+selected project's configuration. Activation performs a second preflight across
+the registry. Missing project directories are skipped and reported, not recreated.
 
-`--upgrade` / `-Upgrade` retargets recognizable same-project Bun MCP entries, preserves other MCP servers and custom settings, and backs up changed existing files outside the repository. The result prints `backupDirectory`. Custom commands, modified arguments, different project roots or ambiguous TOML require manual review. Omit the write flag for a preview. Existing runtimes, index data and memories are retained; managed migrations are forward-only.
-
-After success, reopen/reload the MCP connection and ask the assistant to call `codebase_status`. CLI version should be `0.1.0-alpha.16`; allow indexing to finish before expecting `READY`. To roll back connection settings, close the connection, restore its `.codex/config.toml` / `.mcp.json` from the reported backup, and reopen the previous runtime. This does not roll back database migrations.
+After success, reconnect open clients and verify `codebase_status.runtime.version`
+is `0.1.0-alpha.17`. `system status.activeRuntime` shows the shared target. Project
+roots and index data remain separate. Older unregistered project connections need
+explicit registration; the updater never searches your home folder for projects.
+See [update recovery and process boundaries](docs/installation.md#shared-runtime-updates)
+for backups, interrupted updates, database migrations and process limitations.
 
 ## Everyday CLI commands
 
@@ -199,3 +225,11 @@ On macOS/Linux use `codememory`. MCP accepts the equivalent `diagnosticLimit`
 and `diagnosticOffset` arguments. See [coverage and diagnostics](docs/installation.md#coverage-and-diagnostics)
 for exclusions, preview continuation and process recovery. Alpha.16 uses parser
 revision 6, so the next index rebuilds metadata even when source files are unchanged.
+
+Legacy entry scripts inside the managed releases directory are redirected to the
+shared dispatcher after their original contents are backed up. This prevents cached
+old client commands from restarting an outdated engine. The remaining release
+files are retained; a retired release checkout contains these intentional local
+changes. Original entry scripts are in the first activation backup's
+`rollback.json`. Source checkouts/custom locations outside managed releases are
+not rewritten. Disabled registrations are skipped, not re-enabled by an update.

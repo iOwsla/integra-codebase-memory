@@ -41,6 +41,7 @@ jobs:
         with:
           bun-version: 1.3.3
       - run: bun install --frozen-lockfile
+      - run: bun scripts/verify-upgrade.ts
       - name: Verify Windows PowerShell 5.1 installation
         shell: powershell
         env:
@@ -60,4 +61,4 @@ jobs:
           bun-version: 1.3.3
       - run: bun install --frozen-lockfile
       - run: sh -n scripts/setup/ensure-docker.sh
-      - run: bunx vitest run tests/unit/services.test.ts tests/e2e/installer.test.ts tests/e2e/bootstrap.test.ts
+      - run: bunx vitest run tests/unit/services.test.ts tests/e2e/installer.test.ts tests/e2e/bootstrap.test.ts tests/e2e/update.test.ts

@@ -170,7 +170,8 @@ export interface IndexProgress {
 export interface IndexMetadata {
   indexVersion: number;
   indexedAt: string | null;
-  freshness: "LAST_COMPLETED";
+  freshness: "LAST_COMPLETED" | "UPDATING";
+  staleSince?: string;
   incomplete: boolean;
 }
 export interface PageRequest {

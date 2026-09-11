@@ -5,7 +5,7 @@ import { createProjectContext } from "@codememory/shared";
 import { Command } from "commander";
 import { connectCodex } from "./connect-codex";
 import { runtimeRoot } from "./runtime-root";
-import { installManagementCli, saveRegistration } from "./setup/cli-state";
+import { installManagementCli, saveRegistration, sharedEntry } from "./setup/cli-state";
 import { checkLocalPath, serviceDirectory } from "./setup/service-state";
 
 const serverRoot = runtimeRoot;
@@ -82,7 +82,7 @@ function upgradedEntry(actual: unknown, expected: Record<string, unknown>) {
   const suffix = String(next[0]).endsWith("managed-mcp.ts")
     ? "scripts/managed-mcp.ts"
     : "apps/cli/src/index.ts";
-  if (!old[0].replaceAll("\\", "/").endsWith(`/${suffix}`))
+  if (old[0] !== next[0] && !old[0].replaceAll("\\", "/").endsWith(`/${suffix}`))
     throw new Error(
       "Upgrade must preserve database mode. For an external database or alpha.13 installation use --skip-services (-SkipServices in PowerShell); do not silently switch databases.",
     );
@@ -150,6 +150,7 @@ export async function installProject(
   write = false,
   managed = false,
   upgrade = false,
+  onWrite?: (path: string, content: string) => void,
 ) {
   if (!["codex", "claude", "both"].includes(client))
     throw new Error("Client must be codex, claude or both");
@@ -165,8 +166,12 @@ export async function installProject(
       mode: previous.mode,
     });
   };
-  const entry = resolve(serverRoot, managed ? "scripts/managed-mcp.ts" : "apps/cli/src/index.ts");
-  if (!(await stat(process.execPath)).isFile() || !(await stat(entry)).isFile())
+  const entry = sharedEntry(managed);
+  const runtimeEntry = resolve(
+    serverRoot,
+    managed ? "scripts/managed-mcp.ts" : "apps/cli/src/index.ts",
+  );
+  if (!(await stat(process.execPath)).isFile() || !(await stat(runtimeEntry)).isFile())
     throw new Error(
       "Selected runtime executable or MCP entry is missing; reinstall this release before updating project settings",
     );
@@ -273,6 +278,7 @@ export async function installProject(
       try {
         await writeFile(temporary, edit.after, { flag: "wx", mode: edit.mode });
         await rename(temporary, destination);
+        onWrite?.(destination, edit.after);
       } finally {
         await rm(temporary, { force: true });
       }
@@ -322,34 +328,46 @@ if (import.meta.main && process.argv[1]?.endsWith("install-project.ts")) {
       options.withServices,
       options.upgrade,
     );
-    if (options.write) {
-      await installManagementCli();
-      await saveRegistration({
+    if (options.write && options.upgrade) {
+      const { activateInstalledRuntime } = await import("./setup/activation");
+      const result = await activateInstalledRuntime({
         root: preview.projectRoot,
         client: options.client as "codex" | "claude" | "both",
         managed: !!options.withServices,
         enabled: true,
       });
+      const selected = result.projects.find((p) => p.projectRoot === preview.projectRoot);
+      console.log(JSON.stringify({ ...selected, sharedUpdate: result }, null, 2));
+    } else {
+      if (options.write) {
+        await installManagementCli();
+        await saveRegistration({
+          root: preview.projectRoot,
+          client: options.client as "codex" | "claude" | "both",
+          managed: !!options.withServices,
+          enabled: true,
+        });
+      }
+      if (options.withServices && options.write) {
+        const { setupServices } = await import("./setup/services");
+        await setupServices();
+      }
+      console.log(
+        JSON.stringify(
+          options.write
+            ? await installProject(
+                options.project,
+                options.client,
+                true,
+                options.withServices,
+                options.upgrade,
+              )
+            : { ...preview, servicesPlanned: !!options.withServices },
+          null,
+          2,
+        ),
+      );
     }
-    if (options.withServices && options.write) {
-      const { setupServices } = await import("./setup/services");
-      await setupServices();
-    }
-    console.log(
-      JSON.stringify(
-        options.write
-          ? await installProject(
-              options.project,
-              options.client,
-              true,
-              options.withServices,
-              options.upgrade,
-            )
-          : { ...preview, servicesPlanned: !!options.withServices },
-        null,
-        2,
-      ),
-    );
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Installation failed");
     process.exitCode = 1;

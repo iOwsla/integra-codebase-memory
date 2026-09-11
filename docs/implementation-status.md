@@ -1,6 +1,6 @@
 # Implementation status
 
-Release: **0.1.0-alpha.16**. The supplied specifications are preserved under `docs/specifications/`; the project-isolation amendment takes precedence. This tracker distinguishes the implemented usable foundation from remaining release hardening. The alpha prerelease does not close the remaining production release gates.
+Release: **0.1.0-alpha.17**. The supplied specifications are preserved under `docs/specifications/`; the project-isolation amendment takes precedence. This tracker distinguishes the implemented usable foundation from remaining release hardening. The alpha prerelease does not close the remaining production release gates.
 
 | Phase | Status | Implementation and evidence |
 | --- | --- | --- |
@@ -32,7 +32,17 @@ See `docs/limitations.md` for each incomplete requirement, current implementatio
 Diagnostic summaries/paging, exclusion reasons, preview continuation, adaptive MCP
 result pages, runtime/job identity and CLI progress have regression coverage.
 User-reported alpha.15 large-Windows-repository success is field feedback, not a
-reproduced concurrent-load or lifecycle benchmark. Automated retirement of old
-client processes and release folders, large-monorepo restart under concurrent
-clients, and long-duration acceptance remain open. Existing fixture tests cover
+reproduced concurrent-load or lifecycle benchmark. Alpha.17 addresses verified old
+client processes below; release-folder cleanup, large-monorepo restart under
+concurrent clients and long-duration acceptance remain open. Existing fixture tests cover
 rename/delete, lock contention, interrupted indexing and reconnect recovery.
+
+
+### Alpha.17 runtime and contention follow-up
+
+Shared dispatch and registered-project update activation replace per-release MCP
+paths. The updater retires verified old MCP processes, preserves unrelated
+processes/settings and requires clients to reconnect. PostgreSQL non-owner unlock
+warnings and rapid retry loops are addressed. Known stale generations are marked
+incomplete. Full graph-resolution/Prisma follow-up is tracked in [field feedback](field-feedback.md);
+it is not covered by these runtime changes.

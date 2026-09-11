@@ -73,6 +73,7 @@ export class PostgresStore implements ProjectStore {
   async locked<T>(c: ProjectContext, action: (store: ProjectStore) => Promise<T>): Promise<T> {
     const conn = await this.pool.connect();
     let connectionError: Error | undefined;
+    let acquired = false;
     const onError = (error: Error) => {
       connectionError = error;
     };
@@ -82,7 +83,8 @@ export class PostgresStore implements ProjectStore {
         "SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS acquired",
         [c.projectScopeId],
       );
-      if (!lock.rows[0]?.acquired)
+      acquired = lock.rows[0]?.acquired === true;
+      if (!acquired)
         throw new CodeMemoryError(
           "INDEX_BUSY",
           "Selected project is being indexed by another process; inspect status.lastIndexJob.owner and lockActive, then wait or reconnect the outdated client",
@@ -90,7 +92,7 @@ export class PostgresStore implements ProjectStore {
       return await action(new PostgresStore(undefined, conn, this.pool));
     } finally {
       try {
-        if (!connectionError)
+        if (acquired && !connectionError)
           await conn.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [c.projectScopeId]);
       } finally {
         conn.removeListener("error", onError);
@@ -174,6 +176,8 @@ export class PostgresStore implements ProjectStore {
         await conn.query(
           `
         SELECT version, indexed_at,
+          COALESCE((SELECT data->>'state'='RUNNING' FROM index_jobs WHERE repository_id=$1),false) AS stale,
+          (SELECT data->>'startedAt' FROM index_jobs WHERE repository_id=$1) AS stale_since,
           (EXISTS(SELECT 1 FROM files WHERE repository_id=$1 AND data->>'status'<>'INDEXED')
            OR COALESCE((SELECT jsonb_array_length(data->'diagnostics')>0 FROM index_runs WHERE repository_id=$1 ORDER BY id DESC LIMIT 1),false)) AS incomplete
         FROM repositories WHERE id=$1`,
@@ -185,8 +189,9 @@ export class PostgresStore implements ProjectStore {
       const result = await action(reader, {
         indexVersion: repo.version,
         indexedAt: repo.indexed_at?.toISOString() ?? null,
-        freshness: "LAST_COMPLETED",
-        incomplete: repo.incomplete,
+        freshness: repo.stale ? "UPDATING" : "LAST_COMPLETED",
+        incomplete: repo.incomplete || repo.stale,
+        ...(repo.stale ? { staleSince: repo.stale_since } : {}),
       });
       await conn.query("COMMIT");
       return result;
@@ -327,6 +332,11 @@ export class PostgresStore implements ProjectStore {
     const interrupted = job?.data.state === "RUNNING" && !job.active;
     return {
       ...status,
+      incomplete: !!row.incomplete || job?.data.state === "RUNNING",
+      freshness:
+        job?.data.state === "RUNNING" ? "UPDATING" : row.version ? "LAST_COMPLETED" : "NOT_READY",
+      servedFromVersion: row.version,
+      ...(job?.data.state === "RUNNING" ? { staleSince: job.data.startedAt } : {}),
       diagnosticSummary: {
         total,
         affectedFiles: row.diagnosticSummary?.affectedFiles ?? 0,
