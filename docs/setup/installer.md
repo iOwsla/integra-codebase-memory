@@ -97,15 +97,15 @@ run migrations or index any repository. Follow [database setup](common.md) befor
 opening the configured client.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.12/bootstrap.sh | sh -s -- --project /absolute/target-project --client both --write
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.13/bootstrap.sh | sh -s -- --project /absolute/target-project --client both --write
 ```
 
 For inspection before execution, download with `curl -fLo bootstrap.sh` using the
 same URL, review the file, then run `sh bootstrap.sh` with the same arguments.
 Omit `--write` to preview without downloading or creating files.
 
-Default runtime: `$XDG_DATA_HOME/integra-code-memory/releases/v0.1.0-alpha.12`,
-or `$HOME/.local/share/integra-code-memory/releases/v0.1.0-alpha.12`. Override with
+Default runtime: `$XDG_DATA_HOME/integra-code-memory/releases/v0.1.0-alpha.13`,
+or `$HOME/.local/share/integra-code-memory/releases/v0.1.0-alpha.13`. Override with
 `--install-dir /absolute/runtime`. Keep this directory: client configuration points
 to it. Repeating the command reuses a clean checkout with the expected origin and
 tag; it refuses other existing directories and modified checkouts. Downloads use
@@ -118,4 +118,45 @@ Existing connection entries pointing to another runtime are preserved and reject
 as conflicts. Remove only the `integra_code_memory` entry from the selected
 project's connection files after reviewing it, then rerun the new installer. Other
 servers and project instructions should remain in place. Automated connection
-migration, native binary distribution and Windows bootstrap are not provided.
+migration and native binary distribution are not provided.
+
+## Windows PowerShell
+
+Use Windows PowerShell 5.1 or PowerShell 7 on Windows with Bun 1.3.3+ and Git
+installed. Run this in PowerShell, replacing the project path:
+
+```powershell
+& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.13/bootstrap.ps1').Content)) -Project 'C:\Projects\My App' -Client both -Write
+```
+
+Choose `codex`, `claude` or `both`. Omit `-Write` for a no-write preview.
+The runtime defaults to `%LOCALAPPDATA%\integra-code-memory\releases\v0.1.0-alpha.13`;
+use `-InstallDir 'D:\Tools\CodeMemory'` to choose another location. Drive-relative
+paths are rejected. Runtime junctions and symbolic links are rejected.
+Administrator privileges and Bash are not required. PostgreSQL and explicit
+migrations are still required before launching MCP; installation does not create
+a database, scan other projects or change global client configuration.
+
+For review before execution, download the script and run it in a child process:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.13/bootstrap.ps1' -OutFile bootstrap.ps1
+Get-Content .\bootstrap.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Project 'C:\Projects\My App' -Client both -Write
+```
+
+The execution policy argument applies to that process, not a persistent registry
+setting ([Microsoft documentation](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe?view=powershell-5.1)).
+Organizational Group Policy can still prevent execution. In PowerShell 5.1,
+`curl` may be an alias; the examples use `Invoke-WebRequest -UseBasicParsing`
+explicitly ([Microsoft documentation](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/invoke-webrequest?view=powershell-5.1)).
+
+From an existing source checkout with dependencies installed:
+
+```powershell
+.\install.ps1 -Project 'C:\Projects\My App' -Client both -Write
+```
+
+Repeated installation, conflict preservation and explicit version upgrades follow
+the same rules as the shell installer. Windows CI covers installation and
+configuration; full native Windows database/indexer acceptance remains separate.

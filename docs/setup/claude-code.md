@@ -81,3 +81,5 @@ run inside a Claude Code session.
 
 Sources: [Claude Code MCP](https://code.claude.com/docs/en/mcp),
 [CLAUDE.md and AGENTS.md imports](https://code.claude.com/docs/en/memory).
+
+Windows users: see the [PowerShell installer](installer.md#windows-powershell) and select `-Client claude`.

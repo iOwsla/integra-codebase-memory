@@ -46,3 +46,5 @@ automatically reload the current chat. The connection and a direct in-chat
 on another machine.
 
 Source: [Official Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+
+Windows users: see the [PowerShell installer](installer.md#windows-powershell) and select `-Client codex`.

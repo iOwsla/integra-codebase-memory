@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.13 — 2026-09-11
+
+- Add Windows PowerShell bootstrap and source-checkout installers for explicit project-scoped Codex/Claude setup, without Bash.
+- Add Windows PowerShell 5.1 and PowerShell 7 CI checks for previews, repeat installation, path handling, failures and published-release downloads.
+- Document pinned Windows commands, prerequisites and runtime locations in English.
+- Full native Windows database/indexer acceptance and existing stable-release gates remain open.
+
 ## 0.1.0-alpha.12 — 2026-09-11
 
 - Add project-scoped dead-code candidates and exact-body duplicate reports with bounded pagination, source locations and explicit review requirements.
