@@ -69,6 +69,7 @@ describe("real Bun CLI and MCP STDIO", () => {
     const client = new Client({ name: "acceptance", version: "1.0.0" });
     try {
       await client.connect(transport);
+      expect(client.getInstructions()).toContain("codebase_status");
       const tools = await client.listTools();
       expect(tools.tools.some((t) => t.name === "search_symbols")).toBe(true);
       await eventually(async () => {

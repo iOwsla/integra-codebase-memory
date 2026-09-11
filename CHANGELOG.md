@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-alpha.10 — 2026-09-11
+
+### Added
+- Project-scoped Codex connection preview/installation with explicit source roots, automatic indexing and watching. Existing differing settings are preserved; redirected config directories are refused.
+- MCP initialization guidance, task-specific tool descriptions and repository agent instructions for reference/impact checks and cautious DRY/dead-code reviews.
+- Real MCP connection verifier for root, readiness, tools, symbol search and callers; transient index contention is retried.
+- A stable-release acceptance checklist distinguishing completed transport setup from remaining quality-analysis, distribution and performance work.
+
+### Scope
+- Configuration does not automatically launch PostgreSQL, migrate databases or reload an existing AI client. Dedicated duplicate-code and dead-code reports remain pending.
+
 ## 0.1.0-alpha.9 — 2026-09-11
 
 ### Added

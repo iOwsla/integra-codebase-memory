@@ -189,3 +189,18 @@ Release checks: 79 tests across 13 files passed locally (38.08 seconds), along
 with lint, typecheck and build. A separate 10-second exercise of the final staged
 runner also restored the full baseline graph and completed successfully; this
 short invocation is included in CI.
+
+## MCP onboarding and client connection (alpha.10)
+
+Local lint, typecheck and build passed. All 81 tests across 14 files passed
+(86.14 seconds), including configuration preservation/idempotence, redirected
+config-directory rejection and MCP initialization instructions received through
+a real SDK client. The generated local configuration parsed successfully as TOML.
+
+A standalone real MCP connection to this repository reported the correct root,
+12 tools, automatic indexing and watcher enabled, index version 105 and incomplete
+false. Exact `createProjectContext` search succeeded; the first caller page
+returned 10 records. The verifier retries INDEX_BUSY instead of mistaking normal
+concurrent index ownership for a permanent startup failure. This verifies the
+transport and persisted index, not tool availability in an already-open AI chat.
+The project-scoped client connection is installed locally and excluded from Git.

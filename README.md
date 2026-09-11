@@ -2,7 +2,7 @@
 
 Local code intelligence and explicit project memory for MCP coding agents. Bun + TypeScript Compiler API + PostgreSQL. No telemetry, LLM inference, embeddings or external code uploads.
 
-**Development foundation (`0.1.0-alpha.9`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 12 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
+**Development foundation (`0.1.0-alpha.10`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance. It provides 12 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
 
 ## Install and run
 
@@ -76,3 +76,7 @@ bun run benchmark 1000
 Tests create and remove uniquely named databases. `TEST_DATABASE_URL` selects the administrative connection used to create those test databases; it must have `CREATEDB`. Tests never migrate that database directly.
 
 [Architecture](docs/architecture.md) · [Project isolation](docs/project-isolation.md) · [MCP](docs/mcp.md) · [Regression policy](docs/regression-policy.md) · [Development tracker](docs/implementation-status.md)
+
+For automatic Codex startup, use `bun run connect:codex /absolute/project --write`.
+See [MCP setup](docs/mcp.md) for prerequisites and verification, and
+[stable release acceptance](docs/release-readiness.md) for remaining product gates.

@@ -16,7 +16,7 @@ import { Command } from "commander";
 const cli = new Command()
   .name("codememory")
   .description("Local, explicitly project-scoped code intelligence")
-  .version("0.1.0-alpha.9");
+  .version("0.1.0-alpha.10");
 const collect = (value: string, previous: string[]) => [...previous, value];
 const print = (v: unknown) => process.stdout.write(`${JSON.stringify(v, null, 2)}\n`);
 async function open(project?: string) {
