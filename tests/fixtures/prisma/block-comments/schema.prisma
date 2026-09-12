@@ -1,0 +1,27 @@
+generator client {
+ provider = "prisma-client-js"
+}
+/** Schema documentation */
+model Supplier {
+ /** A multiline field comment
+  * with "quotes", // markers and Unicode: 🧭
+  */
+ id Int @id
+ stocks StockSupplier[]
+ label String @default("literal /* keep me */ and // keep me")
+}
+/* Ordinary block comment */
+model StockSupplier {
+ id Int @id
+ supplierId Int
+ supplier Supplier @relation(fields: [supplierId], references: [id])
+}
+model Warehouse {
+ id Int @id
+}
+model Product {
+ id Int @id
+}
+model Category {
+ id Int @id
+}

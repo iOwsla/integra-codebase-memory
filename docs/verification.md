@@ -361,3 +361,15 @@ rewritten. Alpha.20 normalizes paths before deduplication and adds the trailing
 separator to the native upgrade regression. Local lint/typecheck/build and 16
 affected tests in four files passed. Published-package upgrade acceptance remains
 separate from fixture tests.
+
+## Alpha.22 Prisma block comments (2026-09-12)
+
+The unmodified upstream 3.0.0 parser reproduced the reported slash error on a
+minimal block-comment schema. The compatibility adapter passes 162 tests across
+29 files locally, plus frozen install, lint, typecheck and build. Regression
+coverage includes five models with seven referring schema files, model queries
+through the Bun worker, LF/CRLF line and column positions, UTF-16 Unicode offsets,
+strings/line comments, unterminated comments and original database source previews.
+The private supplier schema was not available; this evidence uses a public fixture.
+Native Windows/macOS runs are required by the release workflow, not inferred from
+local results. Parser revision 8 invalidates previous completed graphs.

@@ -11,7 +11,7 @@ it("queries paginated Prisma usages, persists metadata and replaces deleted/rena
   const db = await testDatabase(),
     f = await fixture({
       "schema.prisma":
-        'generator client {\n provider = "prisma-client-js"\n}\nmodel User {\n id Int @id\n}\n',
+        'generator client {\n provider = "prisma-client-js"\n}\nmodel User {\n /** Original model field documentation */\n id Int @id\n}\n',
       "db.ts":
         "import {PrismaClient} from '@prisma/client';export const client=new PrismaClient();export const user=client.user;",
       "a.ts": "import {user} from './db';export function first(){return user.findMany()}",
@@ -41,6 +41,9 @@ it("queries paginated Prisma usages, persists metadata and replaces deleted/rena
     expect(next.hasMore).toBe(false);
     expect((await service.execute("get_symbol", { symbolId: model.id })).snippet).toContain(
       "model User",
+    );
+    expect((await service.execute("get_symbol", { symbolId: model.id })).snippet).toContain(
+      "/** Original model field documentation */",
     );
     await unlink(resolve(f.root, "a.ts"));
     await writeFile(

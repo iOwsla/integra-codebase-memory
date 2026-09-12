@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.22 — 2026-09-12
+
+- Accept Prisma block comments through a string-aware, position-preserving parser adapter. Preserve original source, UTF-16 offsets and LF/CRLF line endings; keep unterminated comments diagnostic.
+- Restore models, cross-file relations and static model queries when a schema contains `/* ... */` or `/** ... */`. Add worker, source-preview and coordinate regressions.
+- Advance parser revision to 8 so unchanged projects rebuild their graph after the update. No database migration is required.
+
 ## 0.1.0-alpha.21 — 2026-09-12
 
 - Persist and verify the shared CLI directory in Windows user PATH during installation and every update. Remove duplicate shared entries and obsolete launcher directories within the same installation; preserve unrelated and machine PATH entries.

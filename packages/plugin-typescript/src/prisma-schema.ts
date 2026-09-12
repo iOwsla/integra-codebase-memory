@@ -16,6 +16,8 @@ import type {
 } from "@loancrate/prisma-schema-parser";
 import { parsePrismaSchema } from "@loancrate/prisma-schema-parser";
 
+import { maskPrismaBlockComments } from "./prisma-comments";
+
 function value(expression: SchemaExpression): unknown {
   if (expression.kind === "literal") return expression.value;
   if (expression.kind === "path") return expression.value.join(".");
@@ -52,7 +54,10 @@ export class PrismaCatalog {
   ) {
     for (const file of files.filter((f) => f.path.endsWith(".prisma") && f.status === "INDEXED")) {
       try {
-        this.schemaFiles.push({ file, ast: parsePrismaSchema(file.content) });
+        this.schemaFiles.push({
+          file,
+          ast: parsePrismaSchema(maskPrismaBlockComments(file.content)),
+        });
       } catch (error) {
         const e = error as {
           message?: string;

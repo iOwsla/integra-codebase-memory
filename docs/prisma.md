@@ -81,3 +81,16 @@ After updating, reconnect MCP or run `codememory index` in the selected project.
 The parser revision changes, so old graphs are rebuilt on the next index. Only
 then will Prisma symbols and usages appear. `codebase_status.analysisScope`
 includes Prisma and `.prisma`; check diagnostics and generation freshness.
+
+## Block comments
+
+From alpha.22, `/* ... */` and `/** ... */` comments are accepted through a
+compatibility adapter for the upstream parser. Only the parser's in-memory input
+is masked with spaces; original source, LF/CRLF line endings and UTF-16 source
+positions are preserved. Delimiters inside quoted strings or line comments stay
+untouched. Unterminated comments remain syntax errors. Comment text remains in
+source previews; this adapter does not attach block documentation to AST nodes.
+
+After updating, parser revision 8 triggers re-analysis even when source files
+have not changed. Reconnect the selected project's MCP session, wait for its
+index and check diagnostics before reusing model IDs.

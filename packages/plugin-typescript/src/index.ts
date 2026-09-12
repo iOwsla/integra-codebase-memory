@@ -35,7 +35,7 @@ export interface ParserProfileEvent {
 /** Compiler input is an in-memory allowlist produced by the bounded scanner. */
 export class TypeScriptPlugin implements LanguagePlugin {
   readonly id = "typescript";
-  readonly version = `7:prisma1:${ts.version}`;
+  readonly version = `8:prisma2:${ts.version}`;
   readonly configurationReferences = configurationReferences;
   readonly extensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts", ".prisma"];
   constructor(

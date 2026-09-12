@@ -214,3 +214,73 @@ it("does not absorb a nested package schema into its parent's client", async () 
   });
   expect(a.edges.filter((e) => e.type === "PRISMA_QUERY")).toHaveLength(1);
 });
+
+it("indexes five models and cross-file references around block comments in the worker", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const content = await readFile("tests/fixtures/prisma/block-comments/schema.prisma", "utf8");
+  const a = await analyze(
+    {
+      "prisma/schema.prisma": content,
+      ...Object.fromEntries(
+        Array.from({ length: 7 }, (_, i) => [
+          `prisma/order${i}.prisma`,
+          `model Order${i} {\n id Int @id\n supplierId Int\n supplier Supplier @relation(fields: [supplierId], references: [id])\n}\n`,
+        ]),
+      ),
+      "main.ts":
+        "import {PrismaClient} from '@prisma/client';const db=new PrismaClient();const supplier=db.supplier;export function load(){return supplier.findMany()}",
+    },
+    true,
+  );
+  expect(a.diagnostics).toEqual([]);
+  expect(
+    a.symbols.filter((s) => s.kind === "MODEL" && s.file === "prisma/schema.prisma"),
+  ).toHaveLength(5);
+  const supplier = a.symbols.find((s) => s.kind === "MODEL" && s.name === "Supplier")!;
+  expect(supplier.startLine).toBe(5);
+  expect(supplier.startColumn).toBe(1);
+  expect(a.edges.filter((e) => e.type === "RELATES_TO" && e.target === supplier.id)).toHaveLength(
+    8,
+  );
+  expect(a.edges).toContainEqual(
+    expect.objectContaining({
+      type: "PRISMA_QUERY",
+      target: supplier.id,
+      metadata: expect.objectContaining({ operation: "findMany" }),
+    }),
+  );
+});
+
+it.each(["\n", "\r\n"])(
+  "preserves Prisma block-comment source coordinates with %j newlines",
+  async (newline) => {
+    const source = [
+      "/* 😀 */ model User {",
+      "  /* note */ id Int @id",
+      '  value String @default("/* literal */")',
+      "}",
+    ].join(newline);
+    const a = await analyze({ "schema.prisma": source });
+    expect(a.diagnostics).toEqual([]);
+    const model = a.symbols.find((s) => s.kind === "MODEL")!;
+    expect(model.startLine).toBe(1);
+    expect(model.startColumn).toBe(source.indexOf("model") + 1);
+    const field = a.symbols.find((s) => s.qualifiedName === "User.id")!;
+    expect(field.startLine).toBe(2);
+    expect(field.startColumn).toBe(14);
+    const invalid = await analyze({ "schema.prisma": source.replace("id Int @id", "?? Int @id") });
+    expect(invalid.diagnostics).toContainEqual(
+      expect.objectContaining({ kind: "SYNTAX_ERROR", line: 2, column: 14 }),
+    );
+  },
+);
+
+it("reports an unterminated Prisma block comment at its original position", async () => {
+  const a = await analyze({
+    "schema.prisma": "/* valid */\nmodel User {\n id Int @id\n /** unclosed\n}\n",
+  });
+  expect(a.diagnostics).toContainEqual(
+    expect.objectContaining({ kind: "SYNTAX_ERROR", line: 4, column: 2 }),
+  );
+  expect(a.symbols.filter((s) => s.kind === "MODEL")).toEqual([]);
+});
