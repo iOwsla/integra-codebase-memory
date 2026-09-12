@@ -45,4 +45,10 @@ CREATE TABLE memory_jobs(repository_id text NOT NULL REFERENCES repositories(id)
 CREATE INDEX memory_jobs_queue ON memory_jobs(repository_id,state,created_at,id);
 CREATE INDEX memories_recall_content ON memories USING gin(to_tsvector('simple',(data->>'title') || ' ' || (data->>'content')));
 `,
+  `CREATE TABLE memory_checkpoints (
+repository_id text NOT NULL, memory_id text NOT NULL, id text NOT NULL,
+created_at timestamptz NOT NULL, data jsonb NOT NULL,
+PRIMARY KEY(repository_id,id),
+FOREIGN KEY(repository_id,memory_id) REFERENCES memories(repository_id,id) ON DELETE CASCADE);
+CREATE INDEX memory_checkpoints_latest ON memory_checkpoints(repository_id,memory_id,created_at DESC,id DESC);`,
 ];

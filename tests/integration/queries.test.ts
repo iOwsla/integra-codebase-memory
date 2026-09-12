@@ -245,6 +245,7 @@ it("upgrades migration 1 without rewriting indexed data and applies migration 2 
       { version: 3 },
       { version: 4 },
       { version: 5 },
+      { version: 6 },
     ]);
     expect((await t.service.execute("search_symbols", { query: "kept" })).results).toHaveLength(1);
   } finally {

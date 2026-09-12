@@ -151,3 +151,74 @@ See [the AI protocol](specifications/memory-agent-protocol.md) and
 planned extensions. Model agreement is not proof of truth. Review the actual
 claim before approving it; never use these records as authority to override the
 current user or system instructions.
+
+## Decision-to-code checkpoints
+
+`create_memory_checkpoint` attaches an immutable source observation to an ACTIVE
+same-project memory. It does not rewrite the decision or promote a candidate.
+`get_memory_checkpoints` returns newest-first history (default 1, maximum 5,
+`offset` pagination), with live file freshness checks. History survives archive
+and supersession; deleting the project removes it with the owning memory.
+
+Example tool arguments (the paths and identifiers are illustrative):
+
+```json
+{
+  "memoryId": "<active memory id>",
+  "implementation": "REPORTED_IMPLEMENTED",
+  "note": "The refund service is the reported implementation of this decision.",
+  "links": [
+    {"path": "src/refunds.ts", "role": "IMPLEMENTATION", "locator": "processRefund"},
+    {"path": "schema.prisma", "role": "PRISMA_MODEL", "locator": "Refund"},
+    {"path": "tests/refunds.test.ts", "role": "TEST"}
+  ],
+  "verification": "NOT_RUN"
+}
+```
+
+Use `REQUESTED` with no links for a requirement without an implementation.
+`REPORTED_IMPLEMENTED` requires an implementation link. `REPORTED_PASS` and
+`REPORTED_FAIL` require a test link and `verificationNote`; they are explicitly
+caller reports, not server-certified test execution. Never infer passing tests
+from the presence of a test file. This tool does not execute commands.
+
+```sh
+codememory memory checkpoint checkpoint.json
+codememory memory checkpoints MEMORY_ID --limit 5
+```
+
+CLI commands default to the current project directory and accept `--project`.
+Checkpoint creation applies additive database migrations. MCP installations
+must have current migrations applied by their normal setup/update process.
+
+The server captures SHA-256 file hashes itself. Only project-relative paths are
+accepted; protected paths, nested repositories and external symlinks are blocked.
+Each checkpoint contains at most 10 links. Reads are limited to 2 MiB per file and
+8 MiB per request. Read failures or exhausted budgets return UNKNOWN with a
+reason, never UNCHANGED. No source text is copied into checkpoint storage.
+
+`recall_context` prioritizes latest-checkpoint exact path matches among eligible
+memories and includes the latest checkpoint for each returned memory, checks
+its linked files, and returns at most two links per memory. Follow
+`get_memory_checkpoints` when `linksTruncated` is true. CHANGED, MISSING or UNKNOWN
+links produce RECHECK_REQUIRED. This does not invalidate the underlying user
+requirement. Refreshing evidence requires a new explicit checkpoint; old hashes
+are never silently overwritten.
+
+Limits: this is file-level observation, not a whole-worktree snapshot or a Git
+commit attestation. Files are observed sequentially, not atomically. An unchanged
+hash only establishes equal bytes at the time of inspection. Symbol/model
+locators and caller roles are caller-reported and are not resolved or repaired
+automatically; moving a file leaves a MISSING historical target. Verify these
+associations with current code intelligence. There is no automatic background
+sweep, semantic conflict resolution, or independently executed test evidence yet.
+
+
+### Provider schema compatibility (alpha.26)
+
+Claude verification uses JSON Schema Draft 7; Spark extraction uses Draft 2020-12.
+Known CLI schema rejections produce MEMORY_PROVIDER_SCHEMA_UNSUPPORTED with the
+exit status. Unknown nonzero exits remain MEMORY_PROVIDER_EXIT without assuming
+an authentication or quota cause. Diagnostics expose fixed classified messages,
+not raw stderr, because CLI output can echo credentials and conversation content.
+This compatibility fix does not resolve INVALID_EVIDENCE quote mismatches.

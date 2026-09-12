@@ -205,6 +205,26 @@ describe("real Bun CLI and MCP STDIO", () => {
             .structuredContent,
         ),
       ).not.toContain("Alpha secret decision");
+      const memories = (await call("search_memory", { project: aid })).structuredContent as {
+        results: { id: string }[];
+      };
+      const memoryId = memories.results[0]!.id;
+      const checkpointArgs = {
+        memoryId,
+        implementation: "REPORTED_IMPLEMENTED",
+        note: "Synthetic checkpoint",
+        links: [{ path: "a.ts", role: "IMPLEMENTATION" }],
+      };
+      const created = await call("create_memory_checkpoint", { project: aid, ...checkpointArgs });
+      expect(JSON.stringify(created.structuredContent)).toContain("contentHash");
+      const wrong = await call("create_memory_checkpoint", {
+        project: bid,
+        ...checkpointArgs,
+        links: [{ path: "b.ts", role: "IMPLEMENTATION" }],
+      });
+      expect(JSON.stringify(wrong.structuredContent)).toContain("NOT_FOUND");
+      const wrongRead = await call("get_memory_checkpoints", { project: bid, memoryId });
+      expect((wrongRead.structuredContent as { results: unknown[] }).results).toEqual([]);
       await writeFile(resolve(b.root, "b.ts"), "export function betaChanged(){return 3}");
       await eventually(
         async () =>

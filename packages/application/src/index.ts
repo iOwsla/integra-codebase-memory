@@ -121,6 +121,7 @@ export class CodebaseService {
     if (name === "codebase_status") {
       return this.status(input);
     }
+    if (name === "get_memory_checkpoints") return this.memoryWorkflow.checkpoints.list(input);
     if (name === "recall_context") return this.memoryWorkflow.recall(input);
     if (name === "memory_workflow_status") return this.memoryWorkflow.status();
     if (name === "list_memory_candidates") return this.memoryWorkflow.list(input);

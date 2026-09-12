@@ -162,4 +162,20 @@ the supplied evidence and targeted source reads, and disclose that limitation.
 ## Updates
 
 When `codebase_status.updates.state` is `available`, tell the user which newer release is available and ask whether to update. Never install updates without user approval. Update checks occur only when status is queried; do not promise background notifications.
+
+## Code evidence checkpoints
+
+When the user authorizes documenting a decision's implementation, use
+`create_memory_checkpoint` if exposed. First inspect the existing memory and
+current source; link project-relative implementation, caller, Prisma model and
+test paths as applicable. Locators are reported associations, not verified symbol
+identities. Do not claim a test passed merely because its file exists.
+Keep REQUESTED separate from REPORTED_IMPLEMENTED. Report test outcomes only
+with an accurate verificationNote; the checkpoint tool does not execute tests.
+On recall, inspect checkpoint.sourceState and every relevant link. Follow
+`get_memory_checkpoints` when linksTruncated is true. CHANGED, MISSING or UNKNOWN
+requires source review before using old implementation evidence. It does not
+cancel the user requirement. Record new evidence as a new checkpoint; never
+silently reinterpret a missing target as a renamed symbol.
+
 <!-- integra-code-memory:end -->

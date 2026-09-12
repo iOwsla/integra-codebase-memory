@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.26 — 2026-09-12
+
+- Generate Draft 7 JSON Schema for Claude verification while retaining Draft 2020-12 for Spark. Classify CLI schema rejection as `MEMORY_PROVIDER_SCHEMA_UNSUPPORTED` and include exit status without exposing raw stderr.
+
+- Add immutable decision-to-code checkpoints with bounded live file freshness checks, MCP/CLI access and recall summaries. Reported implementation and test results remain separate from independently observed source hashes.
+
 ## 0.1.0-alpha.25 — 2026-09-12
 
 - Add task-scoped memory recall and an opt-in MCP evidence queue with Spark extraction, Haiku verification and explicit approval before promotion.

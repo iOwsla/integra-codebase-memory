@@ -3,6 +3,7 @@ import type { MemoryWorkflowStore } from "./memory-workflow";
 export type {
   MemoryBatch,
   MemoryCandidate,
+  MemoryCheckpoint,
   MemoryJob,
   MemoryWorkflowStore,
 } from "./memory-workflow";

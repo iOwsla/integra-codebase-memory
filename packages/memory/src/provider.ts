@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { access, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, isAbsolute, join, resolve as resolvePath } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { CodeMemoryError } from "@codememory/core";
 import { z } from "zod";
 import {
@@ -109,6 +110,7 @@ export const runModelProcess: ProcessRunner = async (command, args, input, cwd, 
       windowsHide: true,
     });
     let output = "";
+    let stderr = "";
     let bytes = 0;
     let failure: CodeMemoryError | undefined;
     const stop = (code: string) => {
@@ -141,9 +143,11 @@ export const runModelProcess: ProcessRunner = async (command, args, input, cwd, 
       if (bytes > 2 * 1024 * 1024) stop("MEMORY_OUTPUT_LIMIT");
       else output += data;
     });
-    child.stderr.on("data", (data: Buffer) => {
-      bytes += data.length;
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (data: string) => {
+      bytes += Buffer.byteLength(data);
       if (bytes > 2 * 1024 * 1024) stop("MEMORY_OUTPUT_LIMIT");
+      else stderr = (stderr + data).slice(-8192);
     });
     child.stdin.on("error", () => {});
     child.on("error", () => {
@@ -156,18 +160,23 @@ export const runModelProcess: ProcessRunner = async (command, args, input, cwd, 
       clearTimeout(timer);
       signal?.removeEventListener("abort", cancel);
       if (failure) reject(failure);
-      else if (code !== 0)
-        reject(
-          new CodeMemoryError(
-            "MEMORY_PROVIDER_EXIT",
-            "Model CLI failed; verify login and available quota, then retry explicitly",
-          ),
-        );
+      else if (code !== 0) reject(providerExitError(code, stderr));
       else resolve(output);
     });
     child.stdin.end(input);
   });
 };
+/** Emit only fixed diagnostic categories: stderr may contain credentials or input echoes. */
+export function providerExitError(code: number | null, stderr: string) {
+  const clean = stripVTControlCharacters(stderr);
+  const schema = /--json-schema is not a valid JSON Schema|no schema with key or ref/i.test(clean);
+  return new CodeMemoryError(
+    schema ? "MEMORY_PROVIDER_SCHEMA_UNSUPPORTED" : "MEMORY_PROVIDER_EXIT",
+    schema
+      ? `Model CLI rejected the JSON Schema dialect (exit ${code ?? "signal"}); update CodeMemory and check CLI schema compatibility. Raw provider output omitted.`
+      : `Model CLI exited unsuccessfully (exit ${code ?? "signal"}); cause is unclassified. Check CLI version and local diagnostics. Raw provider output omitted to protect credentials and conversation text.`,
+  );
+}
 export class CliMemoryProvider implements MemoryModelProvider {
   constructor(private readonly runner: ProcessRunner = runModelProcess) {}
   async extract(input: unknown, signal?: AbortSignal) {
@@ -182,7 +191,9 @@ export class CliMemoryProvider implements MemoryModelProvider {
     try {
       const model = kind === "spark" ? "gpt-5.3-codex-spark" : "claude-haiku-4-5-20251001";
       const schema = JSON.stringify(
-        z.toJSONSchema(kind === "spark" ? extractionSchema : verificationSchema),
+        z.toJSONSchema(kind === "spark" ? extractionSchema : verificationSchema, {
+          target: kind === "haiku" ? "draft-7" : "draft-2020-12",
+        }),
       );
       let args: string[];
       let prompt: string;

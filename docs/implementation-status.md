@@ -1,6 +1,6 @@
 # Implementation status
 
-Release: **0.1.0-alpha.25**. The supplied specifications are preserved under `docs/specifications/`; the project-isolation amendment takes precedence. This tracker distinguishes the implemented usable foundation from remaining release hardening. The alpha prerelease does not close the remaining production release gates.
+Release: **0.1.0-alpha.26**. The supplied specifications are preserved under `docs/specifications/`; the project-isolation amendment takes precedence. This tracker distinguishes the implemented usable foundation from remaining release hardening. The alpha prerelease does not close the remaining production release gates.
 
 | Phase | Status | Implementation and evidence |
 | --- | --- | --- |
@@ -53,3 +53,21 @@ Located schema declarations, relations, compound foreign keys and proven model
 query usages are implemented with a pinned syntax parser and the existing hermetic
 TypeScript checker. Model aliases do not depend on client variable names.
 See [Prisma coverage](prisma.md) for supported bindings, query APIs and limits.
+
+### Alpha.26: decision-to-code checkpoints
+
+Implemented an additive checkpoint history for active project memories, MCP and
+CLI capture/read access, bounded source hashing, and current freshness summaries
+in recall. Exact paths in the latest checkpoint influence recall ranking.
+AGENTS.md and CLAUDE.md installation templates describe the evidence boundaries.
+
+This addresses the file-evidence portion of the engineering-memory design
+(Evidence Model/Graph, Temporal Memory and Supersession). It is not completion of
+the full v0.2 inventory. Locators and test results remain caller-reported;
+independent test execution, Git/worktree snapshot attestation, symbol lineage,
+automatic maintenance and semantic conflict resolution remain open.
+
+Validation: 188 tests passed in the full local suite; focused MCP routing and
+checkpoint tests also cover multi-project isolation and client restart. Lint,
+typecheck and build passed. No Windows-native runtime or real kiosk-project
+acceptance was performed for this change. Publication is gated by the release workflow.

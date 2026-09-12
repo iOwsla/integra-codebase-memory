@@ -49,6 +49,30 @@ export function registerMemoryCommands(
         return app.service.memoryWorkflow.configure(!!o.enable);
       });
     });
+  command("checkpoint <file>", "Capture source links from a checkpoint JSON file").action(
+    (file: string, o) =>
+      run(o.project, async (app) => {
+        const path = resolve(file);
+        if ((await stat(path)).size > 20000)
+          throw new CodeMemoryError("MEMORY_INPUT_LIMIT", "Checkpoint input exceeds 20000 bytes");
+        await app.store.migrate();
+        return app.service.memoryWorkflow.checkpoints.capture(
+          JSON.parse(await readFile(path, "utf8")),
+        );
+      }),
+  );
+  command("checkpoints <memoryId>", "Inspect checkpoint history and live source freshness")
+    .option("--limit <number>", "Page size, at most 5", "1")
+    .option("--offset <number>", "Page offset", "0")
+    .action((memoryId: string, o) =>
+      run(o.project, (app) =>
+        app.service.memoryWorkflow.checkpoints.list({
+          memoryId,
+          limit: Number(o.limit),
+          offset: Number(o.offset),
+        }),
+      ),
+    );
   command("status", "Inspect selected project workflow configuration").action((o) =>
     run(o.project, (app) => app.service.memoryWorkflow.status()),
   );

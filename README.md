@@ -22,7 +22,7 @@ A function name is only the beginning. Safe changes also require knowing who cal
 
 CodeMemory builds a local, queryable graph for a project you explicitly select. Your agent can follow relationships, retrieve focused source context and recall decisions you asked it to save. One shared installation serves your registered projects; each MCP connection stays bound to its own project.
 
-**Current release: `0.1.0-alpha.25`.** Available for early adopters on Windows, macOS and Linux. The release pipeline tests all three platforms; sustained large-repository and production acceptance remain [open gates](docs/release-readiness.md).
+**Current release: `0.1.0-alpha.26`.** Available for early adopters on Windows, macOS and Linux. The release pipeline tests all three platforms; sustained large-repository and production acceptance remain [open gates](docs/release-readiness.md).
 
 ## What you can do
 
@@ -83,7 +83,7 @@ Choose `codex`, `claude` or `both`. The examples below configure both clients. O
 ### macOS and Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.25/bootstrap.sh | sh -s -- --project "$PWD" --client both --write
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.26/bootstrap.sh | sh -s -- --project "$PWD" --client both --write
 export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/integra-code-memory/cli/bin:$PATH"
 ```
 
@@ -92,7 +92,7 @@ Add the printed CLI directory to your shell profile to retain it in future termi
 ### Windows PowerShell 5.1 or 7
 
 ```powershell
-$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.25/bootstrap.ps1').Content
+$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.26/bootstrap.ps1').Content
 & ([scriptblock]::Create($installer)) -Project (Get-Location).Path -Client both -Write
 ```
 
@@ -142,7 +142,7 @@ codememory update   # Install it into the shared runtime
 On Windows, `codememory.cmd` is also available. If an older PATH entry prevents command discovery:
 
 ```powershell
-& "$env:LOCALAPPDATA\integra-code-memory\cli\bin\codememory.cmd" update --version v0.1.0-alpha.25
+& "$env:LOCALAPPDATA\integra-code-memory\cli\bin\codememory.cmd" update --version v0.1.0-alpha.26
 ```
 
 The updater validates the release, preflights enabled registrations, backs up changed settings and stops verified CodeMemory processes before switching the shared runtime. Project scopes and index data are preserved. Reconnect open MCP clients afterward. Update checks do not install releases in the background; set `CODEMEMORY_UPDATE_CHECK=0` to disable checks.
@@ -249,3 +249,11 @@ For manual fixed scopes, repeat `--project`:
 ```sh
 codememory mcp --project /absolute/project-x --project /absolute/project-y --auto-index --watch
 ```
+
+### Decision-to-code checkpoints (alpha.26)
+
+Attach project-relative implementation, Prisma model and test paths to an active
+memory with `create_memory_checkpoint` or `codememory memory checkpoint`.
+Recall checks recorded file hashes and flags changed or missing evidence while
+preserving the original decision. Reported test results are not independent test
+certification. See [checkpoint usage and limits](docs/memory.md#decision-to-code-checkpoints).

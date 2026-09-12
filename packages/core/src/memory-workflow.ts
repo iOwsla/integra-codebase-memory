@@ -32,6 +32,14 @@ export interface MemoryJob {
   metrics?: Record<string, unknown>;
 }
 export interface MemoryWorkflowStore {
+  saveMemoryCheckpoint(c: ProjectContext, checkpoint: MemoryCheckpoint): Promise<void>;
+  memoryCheckpoints(
+    c: ProjectContext,
+    memoryId: string,
+    limit: number,
+    offset: number,
+  ): Promise<MemoryCheckpoint[]>;
+
   memoryWorkflowEnabled(c: ProjectContext): Promise<boolean>;
   configureMemoryWorkflow(c: ProjectContext, enabled: boolean): Promise<void>;
   enqueueMemory(
@@ -68,4 +76,21 @@ export interface MemoryWorkflowStore {
     symbols: string[],
     limit: number,
   ): Promise<{ results: MemoryEntry[]; hasMore: boolean }>;
+}
+
+/** Immutable source observation; implementation and test claims remain explicitly reported. */
+export interface MemoryCheckpoint {
+  id: string;
+  memoryId: string;
+  createdAt: string;
+  implementation: "REQUESTED" | "REPORTED_IMPLEMENTED";
+  note: string;
+  links: {
+    path: string;
+    role: "IMPLEMENTATION" | "CALLER" | "PRISMA_MODEL" | "TEST";
+    locator?: string;
+    contentHash: string;
+  }[];
+  verification: "NOT_RUN" | "REPORTED_PASS" | "REPORTED_FAIL";
+  verificationNote: string;
 }

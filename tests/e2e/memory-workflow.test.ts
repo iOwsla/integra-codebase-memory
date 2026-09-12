@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { chmod } from "node:fs/promises";
+import { chmod, writeFile } from "node:fs/promises";
 import { delimiter, resolve } from "node:path";
 import { createProjectContext } from "@codememory/shared";
 import { eventually, fixture, testDatabase } from "@codememory/test-utils";
@@ -84,8 +84,26 @@ let input='';process.stdin.on('data',d=>input+=d);process.stdin.on('end',()=>{co
       userApproval: "Test operator approves this synthetic rule.",
     });
     expect(reviewed.memory.id).toBeTruthy();
+    const checkpoint = await data(client, "create_memory_checkpoint", {
+      memoryId: reviewed.memory.id,
+      implementation: "REPORTED_IMPLEMENTED",
+      note: "Synthetic source association",
+      links: [{ path: "src/a.ts", role: "IMPLEMENTATION", locator: "a" }],
+    });
+    expect(checkpoint.checkpoint.links[0].contentHash).toHaveLength(64);
     await client.close();
     client = await connect();
+    expect(
+      (await data(client, "get_memory_checkpoints", { memoryId: reviewed.memory.id })).results[0]
+        .sourceState,
+    ).toBe("UNCHANGED");
+    await writeFile(resolve(f.root, "src/a.ts"), "export const a=2");
+    expect(
+      (await data(client, "recall_context", { task: "refund" })).results[0].checkpoint.sourceState,
+    ).toBe("RECHECK_REQUIRED");
+    const checkpoints = await cli(["memory", "checkpoints", reviewed.memory.id]);
+    expect(checkpoints.code, checkpoints.err).toBe(0);
+    expect(JSON.parse(checkpoints.out).results[0].sourceState).toBe("RECHECK_REQUIRED");
     expect(
       (await data(client, "recall_context", { task: "refund validation" })).results[0].content,
     ).toContain("Validate refund");

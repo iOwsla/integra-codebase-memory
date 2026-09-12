@@ -1,9 +1,10 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fixture } from "@codememory/test-utils";
 import { expect, it } from "vitest";
 import {
   CliMemoryProvider,
+  providerExitError,
   resolveModelCommand,
   runModelProcess,
 } from "../../packages/memory/src/provider";
@@ -22,9 +23,15 @@ it("pins model and isolation flags, accepts unknown Codex model telemetry explic
   const provider = new CliMemoryProvider(async (command, args, _input, cwd) => {
     calls.push({ command, args });
     if (command === "codex") {
+      expect(JSON.parse(await readFile(join(cwd, "schema.json"), "utf8")).$schema).toBe(
+        "https://json-schema.org/draft/2020-12/schema",
+      );
       await writeFile(join(cwd, "output.json"), '{"candidates":[]}');
       return '{"type":"turn.completed","usage":{"input_tokens":1}}';
     }
+    expect(JSON.parse(args[args.indexOf("--json-schema") + 1] ?? "null").$schema).toBe(
+      "http://json-schema.org/draft-07/schema#",
+    );
     return JSON.stringify({
       structured_output: { reviews: [] },
       modelUsage: { "claude-haiku-4-5-20251001": {} },
@@ -104,4 +111,30 @@ it("validates JSON-text verifier responses with the same schema and rejects rena
     }),
   );
   await expect(bad.verify({})).rejects.toMatchObject({ code: "MEMORY_VERIFICATION_SCHEMA" });
+});
+
+it("reports schema incompatibility without leaking arbitrary stderr", async () => {
+  const error = providerExitError(
+    1,
+    'Error: --json-schema is not a valid JSON Schema: no schema with key or ref "https://json-schema.org/draft/2020-12/schema" private-token private-conversation',
+  );
+  expect(error.code).toBe("MEMORY_PROVIDER_SCHEMA_UNSUPPORTED");
+  expect(error.message).not.toContain("private-");
+  expect(providerExitError(7, "unknown private data").message).toContain("exit 7");
+  const f = await fixture({});
+  try {
+    await expect(
+      runModelProcess(
+        process.execPath,
+        [
+          "-e",
+          'process.stderr.write("Error: --json-schema is not a valid JSON Schema: secret-value"); process.exit(1)',
+        ],
+        "",
+        f.root,
+      ),
+    ).rejects.toMatchObject({ code: "MEMORY_PROVIDER_SCHEMA_UNSUPPORTED" });
+  } finally {
+    await f.dispose();
+  }
 });

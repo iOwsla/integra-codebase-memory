@@ -3,6 +3,7 @@ import {
   CodeMemoryError,
   type MemoryBatch,
   type MemoryCandidate,
+  type MemoryCheckpoint,
   type MemoryEntry,
   type MemoryJob,
   type ProjectContext,
@@ -11,6 +12,47 @@ import type pg from "pg";
 
 export class MemoryWorkflowRepository {
   constructor(readonly pool: pg.Pool) {}
+  async saveMemoryCheckpoint(c: ProjectContext, checkpoint: MemoryCheckpoint) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const memory = await client.query(
+        "SELECT data FROM memories WHERE repository_id=$1 AND id=$2 FOR UPDATE",
+        [c.projectScopeId, checkpoint.memoryId],
+      );
+      if (memory.rows[0]?.data.status !== "ACTIVE")
+        throw new CodeMemoryError("NOT_FOUND", "Active memory not found in selected project");
+      await client.query(
+        "INSERT INTO memory_checkpoints(repository_id,memory_id,id,created_at,data) VALUES($1,$2,$3,$4,$5)",
+        [c.projectScopeId, checkpoint.memoryId, checkpoint.id, checkpoint.createdAt, checkpoint],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+  async memoryCheckpoints(
+    c: ProjectContext,
+    memoryId: string,
+    limit: number,
+    offset: number,
+  ): Promise<MemoryCheckpoint[]> {
+    try {
+      return (
+        await this.pool.query(
+          "SELECT data FROM memory_checkpoints WHERE repository_id=$1 AND memory_id=$2 ORDER BY created_at DESC,id DESC LIMIT $3 OFFSET $4",
+          [c.projectScopeId, memoryId, limit, offset],
+        )
+      ).rows.map((r) => r.data);
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "42P01")
+        return [];
+      throw error;
+    }
+  }
   async memoryWorkflowEnabled(c: ProjectContext) {
     try {
       return (
@@ -316,20 +358,35 @@ export class MemoryWorkflowRepository {
     symbols: string[],
     limit: number,
   ) {
-    const rows = (
-      await this.pool.query(
-        `WITH ranked AS (
-      SELECT data,id,CASE data#>>'{scope,type}' WHEN 'symbol' THEN 4 WHEN 'file' THEN 3 WHEN 'directory' THEN 2 ELSE 1 END AS scope_rank,
+    const sql = `WITH ranked AS (
+      SELECT data,id,CASE WHEN EXISTS (
+        SELECT 1 FROM jsonb_array_elements(COALESCE((
+          SELECT cp.data->'links' FROM memory_checkpoints cp
+          WHERE cp.repository_id=$1 AND cp.memory_id=memories.id
+          ORDER BY cp.created_at DESC,cp.id DESC LIMIT 1
+        ),'[]'::jsonb)) link WHERE link->>'path'=ANY($3::text[])
+      ) THEN 5 ELSE CASE data#>>'{scope,type}' WHEN 'symbol' THEN 4 WHEN 'file' THEN 3 WHEN 'directory' THEN 2 ELSE 1 END END AS scope_rank,
       ts_rank(to_tsvector('simple',(data->>'title') || ' ' || (data->>'content')),plainto_tsquery('simple',$2)) AS relevance
       FROM memories WHERE repository_id=$1 AND data->>'status'='ACTIVE' AND (
         data#>>'{scope,type}'='repository' OR
         (data#>>'{scope,type}'='file' AND data#>>'{scope,target}'=ANY($3::text[])) OR
         (data#>>'{scope,type}'='symbol' AND data#>>'{scope,target}'=ANY($4::text[])) OR
         (data#>>'{scope,type}'='directory' AND EXISTS(SELECT 1 FROM unnest($3::text[]) p WHERE data#>>'{scope,target}'='.' OR p=data#>>'{scope,target}' OR starts_with(p,(data#>>'{scope,target}')||'/')))
-      )) SELECT data FROM ranked ORDER BY scope_rank DESC,relevance DESC,(data->>'priority')::int DESC,data->>'createdAt' DESC,id LIMIT $5`,
-        [c.projectScopeId, query, paths, symbols, limit + 1],
-      )
-    ).rows;
+      )) SELECT data FROM ranked ORDER BY scope_rank DESC,relevance DESC,(data->>'priority')::int DESC,data->>'createdAt' DESC,id LIMIT $5`;
+    let rows: { data: MemoryEntry }[];
+    try {
+      rows = (await this.pool.query(sql, [c.projectScopeId, query, paths, symbols, limit + 1]))
+        .rows;
+    } catch (error) {
+      // Preserve recall for pre-checkpoint installations until migrations run.
+      if (!(error && typeof error === "object" && "code" in error && error.code === "42P01"))
+        throw error;
+      const legacy = sql
+        .replace(/CASE WHEN EXISTS \([\s\S]*?THEN 5 ELSE CASE/, "CASE")
+        .replace("ELSE 1 END END AS scope_rank", "ELSE 1 END AS scope_rank");
+      rows = (await this.pool.query(legacy, [c.projectScopeId, query, paths, symbols, limit + 1]))
+        .rows;
+    }
     return {
       results: rows.slice(0, limit).map((r) => r.data as MemoryEntry),
       hasMore: rows.length > limit,
