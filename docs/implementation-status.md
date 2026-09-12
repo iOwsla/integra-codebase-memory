@@ -1,6 +1,6 @@
 # Implementation status
 
-Release: **0.1.0-alpha.26**. The supplied specifications are preserved under `docs/specifications/`; the project-isolation amendment takes precedence. This tracker distinguishes the implemented usable foundation from remaining release hardening. The alpha prerelease does not close the remaining production release gates.
+Release: **0.1.0-alpha.27**. The supplied specifications are preserved under `docs/specifications/`; the project-isolation amendment takes precedence. This tracker distinguishes the implemented usable foundation from remaining release hardening. The alpha prerelease does not close the remaining production release gates.
 
 | Phase | Status | Implementation and evidence |
 | --- | --- | --- |

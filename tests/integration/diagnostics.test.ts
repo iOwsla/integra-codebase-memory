@@ -169,7 +169,7 @@ it("distinguishes preview truncation from index completeness and provides accura
     });
     const status = await service.status();
     expect(status).toMatchObject({
-      runtime: { version: "0.1.0-alpha.26", pid: process.pid, sessionId: c.sessionId },
+      runtime: { version: "0.1.0-alpha.27", pid: process.pid, sessionId: c.sessionId },
       lastIndexJob: { owner: { pid: process.pid, sessionId: c.sessionId }, lockActive: false },
       analysisScope: { languages: ["JavaScript", "TypeScript", "Prisma"] },
     });

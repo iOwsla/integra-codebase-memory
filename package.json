@@ -1,6 +1,6 @@
 {
   "name": "integra-codebase-memory",
-  "version": "0.1.0-alpha.25",
+  "version": "0.1.0-alpha.27",
   "private": true,
   "type": "module",
   "workspaces": [

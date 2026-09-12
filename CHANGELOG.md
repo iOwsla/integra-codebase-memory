@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-alpha.27 — 2026-09-12
+
+- Correct the root package version omitted from the alpha.26 commit. Includes the Claude Draft 7 compatibility fix and decision-to-code checkpoints; alpha.26 publication was blocked by CI.
+
 ## 0.1.0-alpha.26 — 2026-09-12
 
 - Generate Draft 7 JSON Schema for Claude verification while retaining Draft 2020-12 for Spark. Classify CLI schema rejection as `MEMORY_PROVIDER_SCHEMA_UNSUPPORTED` and include exit status without exposing raw stderr.
