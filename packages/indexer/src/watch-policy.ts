@@ -27,19 +27,21 @@ export function watchPolicy(context: ProjectContext) {
     }
     current = dirname(path);
     while (contains(root, current)) {
-      const gi = resolve(current, ".gitignore");
-      try {
-        const stat = lstatSync(gi);
-        if (!stat.isSymbolicLink() && stat.size <= 65536) {
-          const rules = ignore().add(readFileSync(gi, "utf8"));
-          const local = slash(relative(current, path));
-          let directory = false;
-          try {
-            directory = lstatSync(path).isDirectory();
-          } catch {}
-          if (rules.ignores(local + (directory ? "/" : ""))) return true;
-        }
-      } catch {}
+      for (const ignoreName of [".gitignore", ...(current === root ? [".codememoryignore"] : [])]) {
+        const gi = resolve(current, ignoreName);
+        try {
+          const stat = lstatSync(gi);
+          if (!stat.isSymbolicLink() && stat.size <= 65536) {
+            const rules = ignore().add(readFileSync(gi, "utf8"));
+            const local = slash(relative(current, path));
+            let directory = false;
+            try {
+              directory = lstatSync(path).isDirectory();
+            } catch {}
+            if (rules.ignores(local + (directory ? "/" : ""))) return true;
+          }
+        } catch {}
+      }
       if (current === root) break;
       current = dirname(current);
     }

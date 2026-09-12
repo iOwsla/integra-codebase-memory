@@ -25,7 +25,7 @@ import { databaseUrl, readService } from "../../../scripts/setup/service-state";
 const cli = new Command()
   .name("codememory")
   .description("Local, explicitly project-scoped code intelligence")
-  .version("0.1.0-alpha.22")
+  .version("0.1.0-alpha.23")
   .enablePositionalOptions();
 registerManagementCommands(cli);
 cli

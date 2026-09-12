@@ -373,3 +373,12 @@ strings/line comments, unterminated comments and original database source previe
 The private supplier schema was not available; this evidence uses a public fixture.
 Native Windows/macOS runs are required by the release workflow, not inferred from
 local results. Parser revision 8 invalidates previous completed graphs.
+
+## Alpha.23 project ignore rules (2026-09-12)
+
+Local verification passed 166 tests across 29 files, plus lint, typecheck and
+build. Scope tests cover default scratch pruning, watcher agreement, normal
+source retention and root ignore-file negation boundaries. Database regressions
+verify ignore-file creation/deletion removes/restores diagnostics and graph
+entries while real-source binary failures remain incomplete. Native Windows
+workflow includes the new scope cases; publication still requires its success.

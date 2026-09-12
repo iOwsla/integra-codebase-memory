@@ -37,7 +37,7 @@ export function forbidden(path: string): boolean {
     .split("/")
     .some(
       (p) =>
-        /^\.(git|codememory|next|nuxt|tmp|cache)$/.test(p) ||
+        /^\.(git|codememory|next|nuxt|tmp|cache|workflow-tmp)$/.test(p) ||
         ["node_modules", "dist", "build", "coverage", "out", "vendor"].includes(p) ||
         /^\.env(?:\.|$)/i.test(p) ||
         /\.(pem|key|p12|pfx)$/i.test(p) ||

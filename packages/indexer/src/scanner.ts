@@ -30,20 +30,32 @@ export class RepositoryScanner implements FileScanner {
     const matchesInclude = context.effectiveConfig.include.length
       ? picomatch([...context.effectiveConfig.include])
       : () => true;
-    const walk = async (dir: string, parents: { base: string; rules: Ignore }[]) => {
+    const walk = async (
+      dir: string,
+      parents: { base: string; rules: Ignore; reason: string }[],
+    ) => {
       this.observe("scan", dir);
       const rules = [...parents];
-      const ignorePath = resolve(dir, ".gitignore");
-      try {
-        const p = await safePath(context, ignorePath);
-        const s = await lstat(p);
-        if (s.size <= 65536) {
-          const text = await readFile(p, "utf8");
-          configs.set(slash(relative(context.canonicalRoot, p)), text);
-          rules.push({ base: dir, rules: ignore().add(text) });
+      for (const ignoreName of [
+        ".gitignore",
+        ...(dir === context.canonicalRoot ? [".codememoryignore"] : []),
+      ]) {
+        const ignorePath = resolve(dir, ignoreName);
+        try {
+          const p = await safePath(context, ignorePath);
+          const s = await lstat(p);
+          if (s.size <= 65536) {
+            const text = await readFile(p, "utf8");
+            configs.set(slash(relative(context.canonicalRoot, p)), text);
+            rules.push({
+              base: dir,
+              rules: ignore().add(text),
+              reason: ignoreName === ".gitignore" ? "GITIGNORE" : "CODEMEMORYIGNORE",
+            });
+          }
+        } catch (e) {
+          if ((e as { code?: string }).code !== "NOT_FOUND") throw e;
         }
-      } catch (e) {
-        if ((e as { code?: string }).code !== "NOT_FOUND") throw e;
       }
       for (const entry of await readdir(dir, { withFileTypes: true })) {
         const path = resolve(dir, entry.name),
@@ -54,13 +66,9 @@ export class RepositoryScanner implements FileScanner {
             ? "SYMLINK"
             : matchesExclude(rel) || matchesExclude(`${rel}/`)
               ? "CONFIG_EXCLUDE"
-              : rules.some((r) =>
-                    r.rules.ignores(
-                      slash(relative(r.base, path)) + (entry.isDirectory() ? "/" : ""),
-                    ),
-                  )
-                ? "GITIGNORE"
-                : undefined;
+              : rules.find((r) =>
+                  r.rules.ignores(slash(relative(r.base, path)) + (entry.isDirectory() ? "/" : "")),
+                )?.reason;
         if (exclusionReason) {
           exclude(
             entry.isDirectory() ? "directories" : entry.isFile() ? "files" : "other",

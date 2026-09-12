@@ -9,10 +9,10 @@ it("reports syntax locations, bounded diagnostics and distinct exclusions while 
   const db = await testDatabase();
   const f = await fixture({
     ".codememory/config.json": JSON.stringify({
-      exclude: [".workflow-tmp/**"],
+      exclude: ["custom-artifacts/**"],
       maxFileSizeBytes: 1024,
     }),
-    ".workflow-tmp/report.mjs": "const hidden = 'schema'dan';",
+    "custom-artifacts/report.mjs": "const hidden = 'schema'dan';",
     ".gitignore": "ignored/\n",
     "ignored/one.ts": "export const ignored = 1;",
     "good.ts": "export function healthy(){return 42}",
@@ -153,12 +153,75 @@ it("distinguishes preview truncation from index completeness and provides accura
     });
     const status = await service.status();
     expect(status).toMatchObject({
-      runtime: { version: "0.1.0-alpha.22", pid: process.pid, sessionId: c.sessionId },
+      runtime: { version: "0.1.0-alpha.23", pid: process.pid, sessionId: c.sessionId },
       lastIndexJob: { owner: { pid: process.pid, sessionId: c.sessionId }, lockActive: false },
       analysisScope: { languages: ["JavaScript", "TypeScript", "Prisma"] },
     });
   } finally {
     await f.dispose();
     await db.dispose();
+  }
+});
+
+it("ignores temporary report syntax errors while preserving real-source coverage failures", async () => {
+  const { writeFile } = await import("node:fs/promises");
+  const { resolve } = await import("node:path");
+  const db = await testDatabase();
+  const f = await fixture({
+    ".workflow-tmp/report.mjs": "const broken='schema'dan';",
+    "src/service.ts": "export function healthy(){return 1}",
+  });
+  try {
+    const c = await createProjectContext(f.root);
+    await db.store.register(c);
+    const index = new IndexService(c, db.store, new RepositoryScanner(), new TypeScriptPlugin());
+    await index.index();
+    const service = new CodebaseService(c, db.store);
+    expect(await service.status()).toMatchObject({
+      incomplete: false,
+      diagnosticSummary: { total: 0 },
+      incompleteReasons: [],
+    });
+    await writeFile(resolve(f.root, "src/service.ts"), "\0");
+    await index.index();
+    const status = await service.status();
+    expect(status.incomplete).toBe(true);
+    expect(status.incompleteReasons).toContainEqual(
+      expect.objectContaining({ reason: "SKIPPED_BINARY", sampleFiles: ["src/service.ts"] }),
+    );
+  } finally {
+    await db.dispose();
+    await f.dispose();
+  }
+});
+
+it("reconciles ignore-file changes without editing source or restarting the context", async () => {
+  const { writeFile, unlink } = await import("node:fs/promises");
+  const { resolve } = await import("node:path");
+  const db = await testDatabase();
+  const f = await fixture({
+    "scratch.ts": "const broken='schema'dan';",
+    "main.ts": "export const main=1",
+  });
+  try {
+    const c = await createProjectContext(f.root);
+    await db.store.register(c);
+    const index = new IndexService(c, db.store, new RepositoryScanner(), new TypeScriptPlugin());
+    const service = new CodebaseService(c, db.store);
+    await index.index();
+    expect((await service.status()).incomplete).toBe(true);
+    await writeFile(resolve(f.root, ".codememoryignore"), "scratch.ts\n");
+    await index.index();
+    expect(await service.status()).toMatchObject({
+      incomplete: false,
+      diagnosticSummary: { total: 0 },
+      files: 1,
+    });
+    await unlink(resolve(f.root, ".codememoryignore"));
+    await index.index();
+    expect(await service.status()).toMatchObject({ incomplete: true, files: 2 });
+  } finally {
+    await db.dispose();
+    await f.dispose();
   }
 });

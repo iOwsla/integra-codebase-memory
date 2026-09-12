@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.23 — 2026-09-12
+
+- Add root `.codememoryignore` rules shared by scanning and watching, with configuration fingerprinting, scoped negations and explicit exclusion counts.
+
+- Exclude `.workflow-tmp` path components by default across scanning, watching and direct source access. Temporary report syntax errors no longer make an otherwise valid index incomplete.
+- Preserve diagnostics for actual source files and avoid broad report/tmp filename matching. Reconnect and reindex to remove previously indexed temporary files. No database migration is required.
+
 ## 0.1.0-alpha.22 — 2026-09-12
 
 - Accept Prisma block comments through a string-aware, position-preserving parser adapter. Preserve original source, UTF-16 offsets and LF/CRLF line endings; keep unterminated comments diagnostic.

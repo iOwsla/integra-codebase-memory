@@ -81,3 +81,63 @@ it("rejects a symlinked application state directory before reading or creating c
     await b.dispose();
   }
 });
+
+it("prunes workflow scratch directories from scanning, watching and direct source reads", async () => {
+  const { watchPolicy } = await import("../../packages/indexer/src/watch-policy");
+  const f = await fixture({
+    ".workflow-tmp/report.mjs": "broken 'report",
+    "packages/app/.workflow-tmp/report.ts": "broken 'report",
+    "src/report.ts": "export const report=1",
+    "src/workflow-tmp.ts": "export const workflow=1",
+  });
+  try {
+    const c = await createProjectContext(f.root);
+    const visited: string[] = [];
+    const scan = await new RepositoryScanner((_event, path) => visited.push(path)).scan(c);
+    expect(scan.files.map((f) => f.path).sort()).toEqual(["src/report.ts", "src/workflow-tmp.ts"]);
+    expect(visited.some((p) => p.includes(".workflow-tmp"))).toBe(false);
+    expect(scan.exclusions.byReason.PROTECTED_PATH?.directories).toBe(2);
+    const ignored = watchPolicy(c);
+    expect(ignored(resolve(f.root, ".workflow-tmp/report.mjs"))).toBe(true);
+    expect(ignored(resolve(f.root, "packages/app/.workflow-tmp/report.ts"))).toBe(true);
+    expect(ignored(resolve(f.root, "src/report.ts"))).toBe(false);
+    await expect(safePath(c, ".workflow-tmp/report.mjs")).rejects.toMatchObject({
+      code: "PATH_OUT_OF_SCOPE",
+    });
+  } finally {
+    await f.dispose();
+  }
+});
+
+it("shares root codememoryignore rules between scanning and watching with local negations", async () => {
+  const { watchPolicy } = await import("../../packages/indexer/src/watch-policy");
+  const f = await fixture({
+    ".codememoryignore": "scratch/\n*.report.ts\n!keep.report.ts\n!node_modules/\n!git-hidden.ts\n",
+    ".gitignore": "git-hidden.ts\n",
+    "scratch/broken.ts": "bad '",
+    "drop.report.ts": "bad '",
+    "keep.report.ts": "export const keep=1",
+    "git-hidden.ts": "export const hidden=1",
+    "node_modules/secret.ts": "export const dep=1",
+    "src/main.ts": "export const main=1",
+  });
+  try {
+    const c = await createProjectContext(f.root);
+    const scan = await new RepositoryScanner().scan(c);
+    expect(scan.files.map((f) => f.path).sort()).toEqual(["keep.report.ts", "src/main.ts"]);
+    expect(scan.configs.has(".codememoryignore")).toBe(true);
+    expect(scan.exclusions.byReason.CODEMEMORYIGNORE).toMatchObject({ files: 1, directories: 1 });
+    const ignored = watchPolicy(c);
+    for (const path of [
+      "scratch/broken.ts",
+      "drop.report.ts",
+      "git-hidden.ts",
+      "node_modules/secret.ts",
+    ])
+      expect(ignored(resolve(f.root, path))).toBe(true);
+    expect(ignored(resolve(f.root, "keep.report.ts"))).toBe(false);
+    expect(ignored(resolve(f.root, ".codememoryignore"))).toBe(false);
+  } finally {
+    await f.dispose();
+  }
+});

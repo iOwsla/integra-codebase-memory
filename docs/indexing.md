@@ -22,3 +22,57 @@ For larger projects, merge these settings into `.codememory/config.json`, then r
 ```
 
 `codebase_status.error` retains the stable error code. `errorMessage` includes the isolated parser's safe diagnostic (output limit, deadline, failed exit or malformed stream) without echoing worker stderr or source content. It clears after a successful retry. These settings require a release containing the streaming parser; alpha.13/alpha.14 reject the new configuration key.
+
+## Temporary workflow reports
+
+From alpha.23, directories named `.workflow-tmp` are excluded at every depth by
+the shared protected-path policy, alongside existing `.tmp` and `.cache` paths.
+They are not scanned, watched or available through direct source reads. Their
+exclusion contributes to `PROTECTED_PATH` counts, not `incompleteReasons`.
+Normal source names such as `src/report.ts` or `src/workflow-tmp.ts` remain eligible.
+
+After updating, reconnect the project's MCP session and let indexing finish.
+Previously indexed temporary files are removed during normal reconciliation;
+source files on disk are not deleted. Other custom scratch directories can be
+excluded using the `exclude` list in `.codememory/config.json`. Merge entries into
+existing settings rather than replacing the file.
+
+## Project-wide ignore policy
+
+Use a root `.codememoryignore` to share indexing-only exclusions without changing
+Git tracking. It uses gitignore syntax: one pattern per line, `#` comments,
+`**` wildcards and `!` negation within this file. Nested `.codememoryignore` files
+are not loaded. For example:
+
+```gitignore
+# Choose the actual scratch/output paths used by your project.
+/analysis-output/
+**/*.report.mjs
+# Retain a real source file otherwise matched above.
+!src/business.report.mjs
+```
+
+The policy applies to initial indexing, reindexing and watcher pruning. The file
+is included in the index configuration fingerprint, so editing or deleting it
+is picked up by the next scan. Removed index entries are reconciled; source files
+remain on disk. Exclusions are reported as `CODEMEMORYIGNORE` and do not themselves
+make coverage incomplete. The ignore file is read only when at most 64 KiB.
+
+Layers reject independently: protected paths/symlinks, JSON `exclude`, hierarchical
+`.gitignore`, and the root `.codememoryignore`. A negation only cancels an earlier
+match within its own ignore file; it cannot override another layer. An excluded
+parent directory is not visited, so re-including a child also requires keeping its
+parent traversable. Existing source-query operations remain bounded by indexed
+files; the shared hard path rules also apply to direct safe-path access.
+
+Use `include` for a deliberately narrow scope and `excludeGenerated: true` to
+exclude detected generated sources (path conventions or generation markers).
+Generated-source exclusion is opt-in because generated declarations can carry
+useful relationships. Tests, fixtures and files named `report` are not generally
+irrelevant and remain eligible by default. No semantic classifier silently decides
+that source code is unrelated to your project.
+
+This layered approach is comparable to upstream
+[codebase-memory-mcp's documented ignore policy](https://github.com/DeusData/codebase-memory-mcp/blob/9b85dd3eafcbfd0e2106fed3ad025de3910c0a5b/docs/cbmignore.md).
+CodeMemory does not implement that project's fast-mode exclusions, global Git
+ignore configuration or cross-layer negation overrides.
