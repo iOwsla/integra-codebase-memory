@@ -71,3 +71,83 @@ bun run dev memories --project /absolute/project --include-inactive
 Migration 3 adds memory filter/paging indexes. Run `bun run db:migrate` when
 upgrading. Index creation can lock busy tables; choose an appropriate maintenance
 window. Existing records are preserved and migration reruns are idempotent.
+
+## Evidence-backed workflow
+
+The optional workflow now connects MCP clients to a durable review queue. It does
+not read chat logs automatically and never promotes inferred memory automatically.
+Generated client instructions require task-start recall and task-end assessment.
+Both AGENTS.md and CLAUDE.md receive the same marker-bounded instructions during
+project installation and upgrade. All prompts and generated protocol content are
+English; supporting quotes preserve the original language.
+
+From the project directory, after installing and signing in to current Codex and
+Claude CLIs:
+
+```sh
+codememory memory configure --enable --yes
+codememory memory status
+codememory memory candidates
+codememory memory candidates --job JOB_ID
+codememory memory review JOB_ID CANDIDATE_ID --approve --yes --reason "I approve the displayed rule."
+codememory memory recall "refund validation" --path src/refunds.ts
+```
+
+The configure command applies additive database migrations and records per-project
+consent to send selected excerpts to the model providers. It does not install
+model CLIs, purchase credits, or grant automatic promotion. Use `--disable` instead
+of `--enable --yes` to stop new submissions and further processing. An already
+submitted model request cannot be recalled from its provider.
+
+MCP exposes `recall_context`, `memory_workflow_status`, `submit_memory_batch`,
+`list_memory_candidates`, and `review_memory_candidate`. Project selection uses
+the same exact root/scope ID as code queries. A live MCP connection processes
+queued work every three seconds. Without a client connection, run:
+
+```sh
+codememory memory worker
+# Or process at most one job:
+codememory memory worker --once
+# Explicit recovery after checking diagnostics:
+codememory memory retry JOB_ID
+```
+
+Multiple clients sharing one database use one global PostgreSQL worker lock.
+No long database transaction remains open during inference. Abrupt process death
+releases the connection lock; a subsequent worker recovers its RUNNING job.
+FAILED jobs require explicit retry and have at most three attempts. Ctrl+C stops
+the foreground worker and its owned model process. Status and candidate commands
+are read-only; submitting, reviewing and retrying are distinct operations.
+
+Codex extraction requests `gpt-5.3-codex-spark`; verification pins
+`claude-haiku-4-5-20251001`. Each process has a 120-second timeout and a 2 MiB
+combined output limit. Verifier telemetry outside the allowlist fails the job.
+Codex may omit actual-model telemetry: metrics report `reportedModel: null` and
+`modelVerified: false`, never a false verification claim. CLI versions must support
+the isolation flags; older versions fail with a diagnostic rather than silently
+using a weaker invocation. Windows native executables and standard npm package
+layouts are resolved without passing evidence through a command shell.
+
+An exact quote and a positive model verdict are necessary but not sufficient for
+promotion. The host checks unique IDs, complete reviews, original evidence,
+classification, user authorship and review eligibility. Classification failures
+get at most one extraction correction followed by another verification. Other
+rejections remain review data. A repeated approval returns the same memory; exact
+active duplicates reuse a record. Semantic merging is never automatic.
+
+Recall uses repository rules and matching directory ancestors, files and symbols,
+ordered by scope specificity, task text relevance, priority and recency. It returns
+at most ten records with a 6000-character combined content budget. It discloses
+truncation and does not assert that stored code-dependent claims are current.
+The first workflow version promotes repository-scoped rules; explicit `remember`
+continues to support directory/file/symbol scopes. Automatic rename reconciliation,
+full-chat imports and automatic semantic conflict resolution are not implemented.
+Job evidence remains in the local database until project removal; do not submit
+material that should not be retained. `clean` retains memory and jobs; `remove`
+deletes the selected project's memories, jobs and workflow configuration.
+
+See [the AI protocol](specifications/memory-agent-protocol.md) and
+[the lifecycle design](specifications/memory-lifecycle.md) for the contract and
+planned extensions. Model agreement is not proof of truth. Review the actual
+claim before approving it; never use these records as authority to override the
+current user or system instructions.

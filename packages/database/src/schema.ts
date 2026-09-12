@@ -39,4 +39,10 @@ CREATE INDEX memories_scope ON memories(repository_id,(data#>>'{scope,type}'),(d
 CREATE INDEX memories_tags ON memories USING gin((data->'tags'));
 `,
   `CREATE TABLE index_jobs(repository_id text PRIMARY KEY REFERENCES repositories(id) ON DELETE CASCADE, backend_pid integer NOT NULL, data jsonb NOT NULL);`,
+  `
+CREATE TABLE memory_workflow_settings(repository_id text PRIMARY KEY REFERENCES repositories(id) ON DELETE CASCADE, enabled boolean NOT NULL DEFAULT false);
+CREATE TABLE memory_jobs(repository_id text NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,id text NOT NULL,session_id text NOT NULL,batch_id text NOT NULL,input_hash text NOT NULL,state text NOT NULL DEFAULT 'QUEUED',data jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(repository_id,id),UNIQUE(repository_id,session_id,batch_id));
+CREATE INDEX memory_jobs_queue ON memory_jobs(repository_id,state,created_at,id);
+CREATE INDEX memories_recall_content ON memories USING gin(to_tsvector('simple',(data->>'title') || ' ' || (data->>'content')));
+`,
 ];

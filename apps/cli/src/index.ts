@@ -21,11 +21,12 @@ import { assertProjectEnabled, listRegistrations } from "../../../scripts/setup/
 import { managementError, registerManagementCommands } from "../../../scripts/setup/management";
 import { CliProgress } from "../../../scripts/setup/progress";
 import { databaseUrl, readService } from "../../../scripts/setup/service-state";
+import { registerMemoryCommands } from "./memory";
 
 const cli = new Command()
   .name("codememory")
   .description("Local, explicitly project-scoped code intelligence")
-  .version("0.1.0-alpha.24")
+  .version("0.1.0-alpha.25")
   .enablePositionalOptions();
 registerManagementCommands(cli);
 cli
@@ -62,6 +63,7 @@ async function open(project?: string, progress?: CliProgress) {
   const service = new CodebaseService(context, store);
   return { context, store, indexer, service };
 }
+registerMemoryCommands(cli, open);
 const scoped = (name: string, description: string) =>
   cli
     .command(name)

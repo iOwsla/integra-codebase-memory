@@ -1,3 +1,11 @@
+import type { MemoryWorkflowStore } from "./memory-workflow";
+
+export type {
+  MemoryBatch,
+  MemoryCandidate,
+  MemoryJob,
+  MemoryWorkflowStore,
+} from "./memory-workflow";
 export type SymbolKind =
   | "FILE"
   | "MODEL"
@@ -217,7 +225,7 @@ export interface IndexReader {
     after: number,
   ): Promise<Record<string, unknown>>;
 }
-export interface ProjectStore {
+export interface ProjectStore extends MemoryWorkflowStore {
   recordIndexProgress(context: ProjectContext, progress: IndexProgress): Promise<void>;
   register(context: ProjectContext): Promise<void>;
   snapshot(context: ProjectContext): Promise<Snapshot>;

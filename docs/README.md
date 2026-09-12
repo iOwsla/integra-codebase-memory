@@ -32,3 +32,5 @@ CodeMemory provides local code intelligence and explicitly saved project memory 
 - [Published releases](https://github.com/iOwsla/integra-codebase-memory/releases) and [changelog](../CHANGELOG.md).
 - [Contributing](../CONTRIBUTING.md) and [release-writing guide](releasing.md).
 - [Security policy](../SECURITY.md).
+
+- [Evidence-backed memory development and evaluation](memory-development.md)

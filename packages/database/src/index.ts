@@ -14,25 +14,26 @@ import type {
 import { CodeMemoryError } from "@codememory/core";
 import { log, projectName, runtimeInfo } from "@codememory/shared";
 import pg from "pg";
+import { MemoryWorkflowRepository } from "./memory-workflow";
 import { PostgresIndexReader } from "./reader";
 import { migrations } from "./schema";
 export const defaultDatabaseUrl =
   "postgresql://codememory:local-development-only@127.0.0.1:55432/codememory";
-export class PostgresStore implements ProjectStore {
-  readonly pool: pg.Pool;
+export class PostgresStore extends MemoryWorkflowRepository implements ProjectStore {
   constructor(
     url = process.env.DATABASE_URL ?? defaultDatabaseUrl,
     private readonly connection?: pg.PoolClient,
     pool?: pg.Pool,
   ) {
-    this.pool =
+    super(
       pool ??
-      new pg.Pool({
-        connectionString: url,
-        max: 6,
-        connectionTimeoutMillis: 5000,
-        statement_timeout: 30000,
-      });
+        new pg.Pool({
+          connectionString: url,
+          max: 6,
+          connectionTimeoutMillis: 5000,
+          statement_timeout: 30000,
+        }),
+    );
     if (!pool) this.pool.on("error", () => log("error", "database_idle_connection_lost"));
   }
   private query(text: string, values: unknown[] = []) {

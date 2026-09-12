@@ -114,3 +114,8 @@ export class MemoryService {
     return { archived: true };
   }
 }
+
+export { workflowReadSchemas, workflowWriteSchemas } from "./protocol";
+export type { MemoryModelProvider } from "./provider";
+export { CliMemoryProvider } from "./provider";
+export { MemoryWorkflowService } from "./workflow";

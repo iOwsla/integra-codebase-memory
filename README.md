@@ -22,7 +22,7 @@ A function name is only the beginning. Safe changes also require knowing who cal
 
 CodeMemory builds a local, queryable graph for a project you explicitly select. Your agent can follow relationships, retrieve focused source context and recall decisions you asked it to save. One shared installation serves your registered projects; each MCP connection stays bound to its own project.
 
-**Current release: `0.1.0-alpha.24`.** Available for early adopters on Windows, macOS and Linux. The release pipeline tests all three platforms; sustained large-repository and production acceptance remain [open gates](docs/release-readiness.md).
+**Current release: `0.1.0-alpha.25`.** Available for early adopters on Windows, macOS and Linux. The release pipeline tests all three platforms; sustained large-repository and production acceptance remain [open gates](docs/release-readiness.md).
 
 ## What you can do
 
@@ -47,9 +47,27 @@ Try prompts like these after connecting your agent:
 
 The agent decides when to invoke MCP tools. The installer adds [project instructions](docs/instructions/AGENTS.md) to guide discovery and verification.
 
+## Project memory that survives the next session
+
+The opt-in memory workflow lets your coding agent submit selected conversation
+evidence through MCP. Spark extracts English candidates; Haiku checks their
+claims against exact quotes. You review candidates before they become active
+project rules. The next task retrieves relevant rules with `recall_context`.
+
+```sh
+# Run in the selected project after updating and signing in to Codex and Claude CLIs.
+codememory memory configure --enable --yes
+codememory memory status
+codememory memory candidates
+```
+
+Your MCP connection runs the queue in the background. Use `codememory memory
+worker` when no coding client is connected. This is a review workflow, not
+unlimited inference or automatic truth: [setup, approval and limits](docs/memory.md#evidence-backed-workflow).
+
 ## Why CodeMemory
 
-- **Local analysis.** Parsing and graph queries run locally. CodeMemory performs no LLM inference, telemetry or source uploads. Your chosen AI client's data handling still applies to the source returned to it.
+- **Local analysis.** Parsing and graph queries run locally. The optional memory workflow sends only explicitly submitted excerpts to your authenticated Spark/Haiku CLIs after per-project opt-in. It never reads chat history automatically. Your AI providers' data handling applies to those excerpts and any source your coding client requests.
 - **Explicit project boundaries.** Register the directories you want. The server does not discover and index every repository on your machine.
 - **Relationships alongside source.** Query symbols and dependencies, then inspect the exact code behind a finding.
 - **Visible limits.** Diagnostics, unresolved references, pagination and source-preview bounds help distinguish evidence from assumptions.
@@ -65,7 +83,7 @@ Choose `codex`, `claude` or `both`. The examples below configure both clients. O
 ### macOS and Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.24/bootstrap.sh | sh -s -- --project "$PWD" --client both --write
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.25/bootstrap.sh | sh -s -- --project "$PWD" --client both --write
 export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/integra-code-memory/cli/bin:$PATH"
 ```
 
@@ -74,7 +92,7 @@ Add the printed CLI directory to your shell profile to retain it in future termi
 ### Windows PowerShell 5.1 or 7
 
 ```powershell
-$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.24/bootstrap.ps1').Content
+$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.25/bootstrap.ps1').Content
 & ([scriptblock]::Create($installer)) -Project (Get-Location).Path -Client both -Write
 ```
 
@@ -124,7 +142,7 @@ codememory update   # Install it into the shared runtime
 On Windows, `codememory.cmd` is also available. If an older PATH entry prevents command discovery:
 
 ```powershell
-& "$env:LOCALAPPDATA\integra-code-memory\cli\bin\codememory.cmd" update --version v0.1.0-alpha.24
+& "$env:LOCALAPPDATA\integra-code-memory\cli\bin\codememory.cmd" update --version v0.1.0-alpha.25
 ```
 
 The updater validates the release, preflights enabled registrations, backs up changed settings and stops verified CodeMemory processes before switching the shared runtime. Project scopes and index data are preserved. Reconnect open MCP clients afterward. Update checks do not install releases in the background; set `CODEMEMORY_UPDATE_CHECK=0` to disable checks.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.25 — 2026-09-12
+
+- Add task-scoped memory recall and an opt-in MCP evidence queue with Spark extraction, Haiku verification and explicit approval before promotion.
+- Keep generated prompts and client instructions in English, preserve original-language quotes, validate exact schemas and bound classification correction.
+- Add shared database worker locking, restart recovery, model cancellation on lease loss, bounded retries and per-candidate approval provenance.
+- Add memory CLI configure/status/submit/candidates/review/recall/retry/worker commands; refresh both client instruction files.
+- Add migration 5 for project workflow settings, durable jobs and recall indexing. Model processing is disabled by default.
+
 ## 0.1.0-alpha.24 — 2026-09-12
 
 - Attach multiple registered projects to one MCP connection through client-reported roots or the agent's explicit `attach_project` call. Keep query, memory and watcher scopes separate; never expose all registrations.

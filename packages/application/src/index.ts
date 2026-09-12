@@ -1,7 +1,12 @@
 import { relative } from "node:path";
 import type { ProjectContext, ProjectStore } from "@codememory/core";
 import type { ProjectSession } from "@codememory/indexer";
-import { MemoryService, memorySearchSchema } from "@codememory/memory";
+import {
+  MemoryService,
+  MemoryWorkflowService,
+  memorySearchSchema,
+  workflowReadSchemas,
+} from "@codememory/memory";
 import { runtimeInfo, safePath, slash } from "@codememory/shared";
 import { z } from "zod";
 
@@ -59,16 +64,19 @@ export const schemas = {
     .object({ ...paging, minBodyLength: z.number().int().min(20).max(100000).default(80) })
     .strict(),
   search_memory: memorySearchSchema,
+  ...workflowReadSchemas,
 };
 /** Shared application facade. Adapter schemas cannot supply repository IDs. */
 export class CodebaseService {
   readonly memory: MemoryService;
+  readonly memoryWorkflow: MemoryWorkflowService;
   constructor(
     readonly context: ProjectContext,
     private readonly store: ProjectStore,
     private readonly session?: ProjectSession,
   ) {
     this.memory = new MemoryService(context, store);
+    this.memoryWorkflow = new MemoryWorkflowService(context, store);
   }
   async status(input: unknown = {}): Promise<Record<string, unknown>> {
     const options = schemas.codebase_status.parse(input);
@@ -113,6 +121,9 @@ export class CodebaseService {
     if (name === "codebase_status") {
       return this.status(input);
     }
+    if (name === "recall_context") return this.memoryWorkflow.recall(input);
+    if (name === "memory_workflow_status") return this.memoryWorkflow.status();
+    if (name === "list_memory_candidates") return this.memoryWorkflow.list(input);
     if (name === "search_memory") {
       const p = schemas.search_memory.parse(input);
       return this.memory.searchFiltered(p);

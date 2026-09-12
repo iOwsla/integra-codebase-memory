@@ -9,7 +9,7 @@ param(
     [switch]$SkipServices
 )
 $ErrorActionPreference = 'Stop'
-$version = 'v0.1.0-alpha.24'
+$version = 'v0.1.0-alpha.25'
 $repository = 'https://github.com/iOwsla/integra-codebase-memory.git'
 
 function Assert-AbsolutePath([string]$Path) {

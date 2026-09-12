@@ -1,6 +1,6 @@
 # Implementation status
 
-Release: **0.1.0-alpha.24**. The supplied specifications are preserved under `docs/specifications/`; the project-isolation amendment takes precedence. This tracker distinguishes the implemented usable foundation from remaining release hardening. The alpha prerelease does not close the remaining production release gates.
+Release: **0.1.0-alpha.25**. The supplied specifications are preserved under `docs/specifications/`; the project-isolation amendment takes precedence. This tracker distinguishes the implemented usable foundation from remaining release hardening. The alpha prerelease does not close the remaining production release gates.
 
 | Phase | Status | Implementation and evidence |
 | --- | --- | --- |
@@ -10,9 +10,9 @@ Release: **0.1.0-alpha.24**. The supplied specifications are preserved under `do
 | 3 TypeScript parser | DONE | v0.1 construct matrix, declared workspace exports/conditions, referenced custom configs, source redirects, CommonJS, accessor/overload regressions; see parser.md for evidence and explicit analysis limits |
 | 4 Index pipeline | DONE | Hash + parser/config/schema invalidation, no-op row preservation, selected-project conservative semantic re-analysis, deletion repair, atomic publication |
 | 5 Search/graph | DONE | Scoped SQL ranking/paging/snippets and bounded adjacency traversal; repeatable-read generation consistency, query timeouts and additive migration 2; see search.md |
-| 6 Memory | DONE | SQL-paged type/tag/scope search, canonical scope validation, atomic symbol checks, concurrent supersede and retained history; CLI/MCP acceptance tests |
+| 6 Memory | DONE (review workflow) | Scoped recall, opt-in evidence queue, Spark/Haiku protocol, explicit reviewed promotion, durable jobs, recovery and approval history; full-chat ingestion and automatic freshness maintenance remain future work |
 | 7 CLI | DONE | init/add/index/status/doctor/search/symbol/callers/callees/references/remember/memories/mcp/watch/clean/remove/debug plus system/projects/updates management |
-| 8 MCP | DONE | Official SDK v2, 14 strict tools, readiness errors, bounded outputs, parser subprocess, no model-selected repository IDs |
+| 8 MCP | DONE | Official SDK v2, strict code and memory tools, readiness errors, bounded outputs, parser subprocess, no model-selected repository IDs |
 | 9 Hardening | IN PROGRESS | Read-failure retry, durable stages, interrupted owner detection, active DB disconnect/SIGKILL recovery and compact manifests verified; call-owner regressions, isolated worker failure diagnostics and offline acceptance verified; phase profiling and allocation reductions added; bounded watcher bursts/retry/restart and changes queued during analysis covered; five-minute own-repository simulation restored the complete graph; long-duration and full large-file compiler performance remain open |
 | 10 Documentation/release | IN PROGRESS | README, ADRs, guides, issue template, changelog, limitations; hosted Linux prerelease CI verified; project-only shell installer for Codex/Claude, MCP instructions and acceptance checklist added; stable-release hardening gates remain |
 

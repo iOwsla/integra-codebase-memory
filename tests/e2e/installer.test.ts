@@ -63,6 +63,13 @@ it("merges both clients, preserves other settings and instructions, and is idemp
     const claudeRules = await readFile(resolve(f.root, "CLAUDE.md"), "utf8");
     expect(claudeRules).toContain("attach_project");
     expect(claudeRules).toContain("diagnosticLimit");
+    for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+      const rules = await readFile(resolve(f.root, name), "utf8");
+      expect(rules).toContain("recall_context");
+      expect(rules).toContain("submit_memory_batch");
+      expect(rules).toContain("review_memory_candidate");
+      expect(rules).toContain("Only after explicit approval");
+    }
     expect(claudeRules).toContain("Keep these too.");
     expect(claudeRules).not.toContain("@AGENTS.md");
     const paths = JSON.parse(first.stdout).changedFiles as string[];
@@ -324,6 +331,8 @@ it("upgrades recognizable connections with backups while preserving unrelated se
     expect(updatedRules).not.toContain("@AGENTS.md");
     expect(updatedRules).toContain("attach_project");
     expect(updatedRules).toContain("diagnosticLimit");
+    expect(updatedRules).toContain("Project memory lifecycle (protocol 1)");
+    expect(updatedRules).toContain("submit_memory_batch");
     expect(JSON.parse((await apply("--upgrade", "--write")).stdout).changedFiles).toEqual([]);
     now.mcpServers.integra_code_memory.args[3] = resolve(f.root, "different-project");
     await writeFile(claudePath, JSON.stringify(now));
