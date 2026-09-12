@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { promisify } from "node:util";
 import { z } from "zod";
 import { runtimeRoot } from "../runtime-root";
 import { checkLocalPath, serviceDirectory } from "./service-state";
@@ -129,8 +131,20 @@ export async function installManagementCli(
     await write(path, `#!/bin/sh\nexec ${quote(executable)} ${quote(entry)} "$@"\n`);
     await chmod(path, 0o700);
   }
+  if (process.platform === "win32") {
+    await promisify(execFile)("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      resolve(runtimeRoot, "scripts/setup/ensure-cli-path.ps1"),
+      "-CliBin",
+      directory,
+    ]);
+  }
   console.error(
-    `Management CLI installed: ${path}\nAdd ${directory} to your user PATH, or invoke this absolute path. After a reboot use: codememory system setup --project <absolute-project-path>`,
+    `Management CLI installed: ${path}\n${process.platform === "win32" ? "User PATH repaired automatically. Restart already-open terminal applications." : `Add ${directory} to your user PATH, or invoke this absolute path.`} After a reboot use: codememory system setup --project <absolute-project-path>`,
   );
   return { executable: path, pathDirectory: directory };
 }

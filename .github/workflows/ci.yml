@@ -47,12 +47,16 @@ jobs:
         shell: powershell
         env:
           TEST_PUBLISHED_BOOTSTRAP: ${{ startsWith(github.ref, 'refs/tags/') }}
-        run: ./tests/windows-installer.ps1
+        run: |
+          ./tests/windows-path.ps1
+          ./tests/windows-installer.ps1
       - name: Verify PowerShell 7 installation
         shell: pwsh
         env:
           TEST_PUBLISHED_BOOTSTRAP: ${{ startsWith(github.ref, 'refs/tags/') }}
-        run: ./tests/windows-installer.ps1
+        run: |
+          ./tests/windows-path.ps1
+          ./tests/windows-installer.ps1
   macos-installer:
     runs-on: macos-latest
     steps:

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.21 — 2026-09-12
+
+- Persist and verify the shared CLI directory in Windows user PATH during installation and every update. Remove duplicate shared entries and obsolete launcher directories within the same installation; preserve unrelated and machine PATH entries.
+- Refresh the PowerShell installer session and broadcast environment changes for newly launched applications. Existing terminal/IDE processes still need restarting after a CLI update.
+- Add native PowerShell 5.1/7 regressions for persistence, legacy cleanup, unrelated entries, repeat repair and missing-launcher failures.
+
 ## 0.1.0-alpha.20 — 2026-09-12
 
 - Normalize active runtime paths before deduplicating release folders. A trailing separator in the alpha.18 active pointer could otherwise cause duplicate legacy-entry rewrites and roll back the upgrade. Preserve Windows case-insensitive path comparison.

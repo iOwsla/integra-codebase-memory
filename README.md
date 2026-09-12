@@ -2,7 +2,7 @@
 
 Local code intelligence and explicit project memory for MCP coding agents. Bun + TypeScript Compiler API + PostgreSQL. No telemetry, LLM inference, embeddings or external code uploads.
 
-**Development foundation (`0.1.0-alpha.20`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance, plus Prisma schema relations and statically resolved model usages. It provides 14 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
+**Development foundation (`0.1.0-alpha.21`)**. It indexes JS/JSX/TS/TSX/MJS/CJS/MTS/CTS declarations, imports, static calls, references and inheritance, plus Prisma schema relations and statically resolved model usages. It provides 14 bounded MCP tools, a CLI, project memory and process-owned watchers. Read [implementation status](docs/implementation-status.md) and [limitations](docs/limitations.md) before using it as an exhaustive source of truth. This is an alpha prerelease; production release gates remain open.
 
 Management commands and reboot recovery: [CLI guide](docs/installation.md). Large project parser settings: [indexing guide](docs/indexing.md).
 
@@ -13,14 +13,14 @@ Open a terminal **inside the project you want to index**. Install Bun 1.3.3+ and
 ### macOS and Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.20/bootstrap.sh | sh -s -- --project "$PWD" --client both --write
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.21/bootstrap.sh | sh -s -- --project "$PWD" --client both --write
 export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/integra-code-memory/cli/bin:$PATH"
 ```
 
 ### Windows PowerShell 5.1 or 7
 
 ```powershell
-$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.20/bootstrap.ps1').Content
+$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.21/bootstrap.ps1').Content
 & ([scriptblock]::Create($installer)) -Project (Get-Location).Path -Client both -Write
 $env:Path = "$env:LOCALAPPDATA\integra-code-memory\cli\bin;$env:Path"
 ```
@@ -64,7 +64,7 @@ process termination; unrelated client settings are preserved.
 Windows, for a managed Docker/PostgreSQL installation:
 
 ```powershell
-$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.20/bootstrap.ps1').Content
+$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.21/bootstrap.ps1').Content
 & ([scriptblock]::Create($installer)) -Project (Get-Location).Path -Client both -Upgrade -Write
 $env:Path = "$env:LOCALAPPDATA\integra-code-memory\cli\bin;$env:Path"
 codememory.cmd --version
@@ -77,7 +77,7 @@ The selected database mode cannot silently change during migration.
 macOS/Linux, managed installation:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.20/bootstrap.sh | sh -s -- --project "$PWD" --client both --upgrade --write
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.21/bootstrap.sh | sh -s -- --project "$PWD" --client both --upgrade --write
 export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/integra-code-memory/cli/bin:$PATH"
 codememory --version
 ```
@@ -87,7 +87,7 @@ selected project's configuration. Activation performs a second preflight across
 the registry. Missing project directories are skipped and reported, not recreated.
 
 After success, reconnect open clients and verify `codebase_status.runtime.version`
-is `0.1.0-alpha.20`. `system status.activeRuntime` shows the shared target. Project
+is `0.1.0-alpha.21`. `system status.activeRuntime` shows the shared target. Project
 roots and index data remain separate. Older unregistered project connections need
 explicit registration; the updater never searches your home folder for projects.
 See [update recovery and process boundaries](docs/installation.md#shared-runtime-updates)
@@ -237,3 +237,18 @@ files are retained; a retired release checkout contains these intentional local
 changes. Original entry scripts are in the first activation backup's
 `rollback.json`. Source checkouts/custom locations outside managed releases are
 not rewritten. Disabled registrations are skipped, not re-enabled by an update.
+
+### Windows command discovery
+
+Windows installation and updates automatically repair the current user's PATH,
+placing the shared `cli\bin` launcher first in the user PATH. Repeated installs
+remove duplicate entries, an incorrectly added `cli` directory, and old release
+`bin` / `cli\bin` entries under the same installation root. Other entries and
+the machine PATH are preserved. No administrator access is needed for this repair.
+
+The PowerShell installer also refreshes its invoking session. After a CLI update,
+close all existing Windows Terminal windows (or restart the IDE hosting your
+terminal), then run `where.exe codememory.cmd` and `codememory.cmd --version`.
+Already-running parent applications cannot receive a changed process environment
+from the CLI child process. If an unrelated or machine-level installation shadows
+the command, inspect `where.exe codememory.cmd`; it is not deleted automatically.

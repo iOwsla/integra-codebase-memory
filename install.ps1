@@ -20,3 +20,11 @@ if ($Write) { $arguments += '--write' }
 if ($WithServices) { $arguments += '--with-services' }
 & bun @arguments
 if ($LASTEXITCODE -ne 0) { throw "Project installer failed (exit $LASTEXITCODE)." }
+
+if ($Write) {
+    $serviceRoot = $env:CODEMEMORY_SERVICE_DIR
+    if (-not $serviceRoot) { $serviceRoot = Join-Path $env:LOCALAPPDATA 'integra-code-memory\service' }
+    $cliBin = Join-Path (Split-Path -Parent $serviceRoot) 'cli\bin'
+    # Dot-source to refresh the invoking PowerShell session as well as persistent PATH.
+    . (Join-Path $PSScriptRoot 'scripts/setup/ensure-cli-path.ps1') -CliBin $cliBin
+}
