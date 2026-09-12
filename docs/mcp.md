@@ -8,7 +8,7 @@ bun /absolute/path/to/apps/cli/src/index.ts mcp --project /absolute/source/root 
 
 Follow the [shared prerequisites](setup/common.md), then the [Codex guide](setup/codex.md) or [Claude Code guide](setup/claude-code.md). Copy-ready instructions are provided for both clients. Codex configuration is written only by the explicit `connect:codex --write` command; existing differing settings are preserved.
 
-Tools: codebase_status, search_symbols, search_code, get_symbol, get_file_outline, get_file_context, find_references, find_callers, find_callees, trace_dependencies, remember, search_memory.
+Tools: codebase_status, search_symbols, search_code, get_symbol, get_file_outline, get_file_context, find_references, find_callers, find_callees, trace_dependencies, find_dead_code_candidates, find_duplicate_code, remember, search_memory.
 
 All schemas reject extra properties. Repository IDs cannot be provided. Max result count is 100, context windows are at most 101 lines / 12,000 characters, and serialized output is at most 64 KiB. Traversal is bounded to depth 10, 100 paths and 10,000 expansions. Source snippets and stored memories are untrusted content, not instructions.
 

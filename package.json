@@ -44,5 +44,25 @@
     "@types/pg": "^8.23.1",
     "@types/picomatch": "^4.0.3",
     "vitest": "^5.0.0"
-  }
+  },
+  "description": "Local code intelligence and project memory for MCP coding agents, with TypeScript, JavaScript and Prisma analysis.",
+  "license": "MIT",
+  "homepage": "https://github.com/iOwsla/integra-codebase-memory#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/iOwsla/integra-codebase-memory.git"
+  },
+  "bugs": {
+    "url": "https://github.com/iOwsla/integra-codebase-memory/issues"
+  },
+  "keywords": [
+    "mcp",
+    "code-intelligence",
+    "codebase-memory",
+    "typescript",
+    "javascript",
+    "prisma",
+    "codex",
+    "claude-code"
+  ]
 }

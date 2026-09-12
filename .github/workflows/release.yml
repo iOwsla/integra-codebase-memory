@@ -27,7 +27,15 @@ jobs:
               assert json.loads(manifest.read_text())['version'] == version, str(manifest)
           changelog = Path('CHANGELOG.md').read_text()
           section = changelog.split('## ' + version + ' — ', 1)[1].split('\n', 1)[1].split('\n## ', 1)[0]
-          Path('release-notes.md').write_text(section.strip() + '\n')
+          curated = Path('docs/releases') / (os.environ['RELEASE_TAG'] + '.md')
+          title = os.environ['RELEASE_TAG']
+          body = section.strip()
+          if curated.exists():
+              heading, body = curated.read_text().split('\n', 1)
+              assert heading.startswith('# ' + title + ' — '), 'Release note title must match tag'
+              title = heading.removeprefix('# ')
+          Path('release-notes.md').write_text(body.strip() + '\n')
+          Path('release-title.txt').write_text(title)
           PY
       - name: Publish verified release
         env:
@@ -36,4 +44,4 @@ jobs:
         run: |
           flags=()
           if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
-          gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file release-notes.md "${flags[@]}"
+          gh release create "$RELEASE_TAG" --verify-tag --title "$(cat release-title.txt)" --notes-file release-notes.md "${flags[@]}"

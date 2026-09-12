@@ -11,7 +11,7 @@ This is a runnable development foundation, not yet a production-certified v0.1.0
 - Config is validated when a process starts. Restart sessions after editing `.codememory/config.json`; state files are deliberately not watched.
 - Doctor exposes latest-attempt stages, interrupted lock owners and bounded file errors. Recovery is an explicit index retry; progress is operational metadata separate from graph publication, not a full job history.
 - No optional embeddings, framework extraction, remote server, automatic memory inference, global memory access or global daemon. These are intentionally outside v0.1's core scope.
-- Supported verification scope is local macOS arm64 and hosted Linux. Windows, sustained production load and total peak memory across parser workers remain unverified. Real-repository samples are not production performance guarantees.
+- Verification includes local macOS arm64 and hosted Linux, macOS and Windows workflows, including PowerShell 5.1/7 installer checks. Sustained production load, clean-machine interactive installation and total peak memory across parser workers remain open acceptance work. Real-repository samples are not production performance guarantees.
 
 Next milestone: phase 9 hardening and broader real-repository acceptance, followed by the stable-release documentation gate.
 
