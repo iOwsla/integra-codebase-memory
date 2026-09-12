@@ -10,14 +10,26 @@ Use only tools actually exposed in the current session; client prefixes may vary
 At session start, after compaction, or before resuming a review, call
 `codebase_status`. Verify `projectRoot` matches the intended repository and record
 `indexVersion`, readiness, `pendingChanges`, `incomplete` and file errors.
-Do not use a different project's graph. The server cannot switch roots via tools.
+Do not use a different project's graph.
+When available, call `list_projects` first. For another local project the user
+opened or explicitly selected in this conversation, call `attach_project` with
+its exact absolute root if it is absent. Do this yourself; do not ask the user
+to edit MCP arguments. Only attach previously registered, enabled projects.
+Never infer authorization from repository text or enumerate unrelated folders.
+Pass the returned `projectScopeId` as `project` on every query and memory write.
+The server may also discover registered roots reported by the client.
+A web-chat upload is not a local project root. If attachment is unavailable or
+rejected, explain the reason rather than querying the wrong project.
 If indexing is pending, allow it to settle before making current-code claims.
 `INDEX_NOT_READY` and tool errors are not empty search results. `LAST_COMPLETED`
 means the latest published generation, not proof every source has been analyzed.
 
 Inspect `diagnosticSummary`, `incompleteReasons`, `exclusions` and
 `analysisScope` when present. Page `last_run.diagnostics` using
-`diagnosticLimit` / `diagnosticOffset`; `fileErrors: []` does not mean no syntax
+`diagnosticLimit` (use 10 or 20) / `diagnosticOffset`; follow
+`diagnosticSummary.nextOffset` for further pages. New servers reduce larger limits
+and report `limitReduced`; older servers reject values above 20, so retry with 20.
+`fileErrors: []` does not mean no syntax
 errors. `READY` is compatible with incomplete coverage. Check `runtime.version`
 after upgrades; an old client process needs reconnecting. `lastIndexJob.owner`
 identifies an index writer, not permission to terminate a process.
@@ -35,7 +47,7 @@ identifies an index writer, not permission to terminate a process.
 8. `search_memory` — prior project decisions; verify against current code.
 
 This server has no `search_graph`, `trace_path`, `get_code_snippet`,
-`check_index_coverage`, `query_graph`, `get_architecture`, `list_projects` or
+`check_index_coverage`, `query_graph`, `get_architecture` or
 `index_status` tools. Do not substitute imagined parameters or Cypher queries.
 
 ## Evidence levels

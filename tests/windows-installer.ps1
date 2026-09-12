@@ -25,6 +25,7 @@ try {
     Assert ($again.changedFiles.Count -eq 0) 'Repeated install changed files.'
     $config = Get-Content -LiteralPath (Join-Path $project '.mcp.json') -Raw | ConvertFrom-Json
     Assert ($config.mcpServers.integra_code_memory.args[3] -eq $project) 'Wrong project root.'
+    Assert ($config.mcpServers.integra_code_memory.args -contains '--session-projects') 'Session attachment must be enabled.'
     Assert (Test-Path -LiteralPath (Join-Path $project '.codex/config.toml')) 'Missing Codex config.'
     Must-Fail { & $installer -Project 'relative' -Client codex -Write }
     foreach ($client in @('codex', 'claude')) {
@@ -67,7 +68,7 @@ try {
 
     if ($env:TEST_PUBLISHED_BOOTSTRAP -eq 'true') {
         $downloadedScript = Join-Path $temporary 'downloaded-bootstrap.ps1'
-        Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.23/bootstrap.ps1' -OutFile $downloadedScript
+        Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.24/bootstrap.ps1' -OutFile $downloadedScript
         $liveProject = Join-Path $temporary 'downloaded target'
         [void][IO.Directory]::CreateDirectory($liveProject)
         $liveRuntime = Join-Path $temporary 'downloaded runtime'
@@ -93,7 +94,7 @@ try {
             [void][IO.Directory]::CreateDirectory((Join-Path $destination '.git'))
             Set-Content -LiteralPath (Join-Path $destination 'install.ps1') -Value 'param($Project, $Client, [switch]$Write, [switch]$WithServices) if (-not $Write) { throw "Missing write" }; Set-Content -LiteralPath (Join-Path $PSScriptRoot "received.txt") -Value "$Project|$Client"'
         } elseif ($args[2] -eq 'remote') { 'https://github.com/iOwsla/integra-codebase-memory.git' }
-        elseif ($args[2] -eq 'describe') { 'v0.1.0-alpha.23' }
+        elseif ($args[2] -eq 'describe') { 'v0.1.0-alpha.24' }
     }
     function bun {
         $global:LASTEXITCODE = 0

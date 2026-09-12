@@ -201,3 +201,20 @@ files are retained; a retired release checkout contains these intentional local
 changes. Original entry scripts are in the first activation backup's
 `rollback.json`. Source checkouts/custom locations outside managed releases are
 not rewritten. Disabled registrations are skipped, not re-enabled by an update.
+
+## Instruction refresh on updates
+
+For `--client both`, the installer writes the full current instructions into
+both AGENTS.md and CLAUDE.md, using each file's matching release template.
+It replaces only the content between
+`<!-- integra-code-memory:start -->` and
+`<!-- integra-code-memory:end -->`. Content outside the block is preserved.
+If no block exists, one is appended. Ambiguous or malformed markers fail without
+overwriting the file.
+
+A successful shared CLI update refreshes these blocks in registered, enabled
+projects whose directories still exist, according to their selected client.
+Disabled or missing projects are skipped. Repeated installation is idempotent.
+Legacy managed CLAUDE.md blocks containing only `@AGENTS.md` are replaced with
+full instructions; user-owned imports outside the markers remain untouched.
+Client-specific installations update only that client's instruction file.

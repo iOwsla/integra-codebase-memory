@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.24 — 2026-09-12
+
+- Attach multiple registered projects to one MCP connection through client-reported roots or the agent's explicit `attach_project` call. Keep query, memory and watcher scopes separate; never expose all registrations.
+- Enable session attachment in Codex/Claude installations and refresh complete marker-managed instructions in both AGENTS.md and CLAUDE.md on successful updates.
+- Support repeated `--project` arguments for fixed workspaces. Require query project selection when more than one project is attached.
+- Reduce oversized diagnostic page requests to 20 with explicit pagination metadata instead of rejecting the status call. Preserve validation for invalid types and nonpositive limits.
+
 ## 0.1.0-alpha.23 — 2026-09-12
 
 - Add root `.codememoryignore` rules shared by scanning and watching, with configuration fingerprinting, scoped negations and explicit exclusion counts.

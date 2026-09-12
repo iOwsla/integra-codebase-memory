@@ -50,6 +50,7 @@ it("merges both clients, preserves other settings and instructions, and is idemp
     const first = await run(f.root);
     expect(first.stdout).not.toContain("do-not-print");
     const codex = await readFile(resolve(f.root, ".codex/config.toml"), "utf8");
+    expect(codex).toContain("--session-projects");
     expect(codex).toContain('# keep this comment\nmodel = "existing-model"');
     expect(codex).toContain('[mcp_servers.other]\ncommand = "other-command"');
     const claude = JSON.parse(await readFile(resolve(f.root, ".mcp.json"), "utf8"));
@@ -57,8 +58,13 @@ it("merges both clients, preserves other settings and instructions, and is idemp
     expect(claude.mcpServers.other.env.SECRET).toBe("do-not-print");
     expect(claude.mcpServers.integra_code_memory.args).toContain(f.root);
     expect(claude.mcpServers.integra_code_memory.args).toContain("--auto-index");
+    expect(claude.mcpServers.integra_code_memory.args).toContain("--session-projects");
     expect(await readFile(resolve(f.root, "AGENTS.md"), "utf8")).toContain("Keep business rules.");
-    expect(await readFile(resolve(f.root, "CLAUDE.md"), "utf8")).toContain("@AGENTS.md");
+    const claudeRules = await readFile(resolve(f.root, "CLAUDE.md"), "utf8");
+    expect(claudeRules).toContain("attach_project");
+    expect(claudeRules).toContain("diagnosticLimit");
+    expect(claudeRules).toContain("Keep these too.");
+    expect(claudeRules).not.toContain("@AGENTS.md");
     const paths = JSON.parse(first.stdout).changedFiles as string[];
     const before = await Promise.all(paths.map((p) => readFile(resolve(f.root, p), "utf8")));
     expect(JSON.parse((await run(f.root)).stdout).changedFiles).toEqual([]);
@@ -147,22 +153,24 @@ it.each(["directory", "symlink", "hardlink"])(
   },
 );
 
-it("updates an existing marked block without duplicating an AGENTS import", async () => {
+it("refreshes full instructions in both files while preserving user-owned imports", async () => {
   const f = await fixture({
     "AGENTS.md":
       "before\n<!-- integra-code-memory:start -->\nold rules\n<!-- integra-code-memory:end -->\nafter\n",
     "CLAUDE.md": "@AGENTS.md\n\nKeep Claude rules.\n",
   });
   try {
-    await run(f.root, "claude");
+    await run(f.root, "both");
     const text = await readFile(resolve(f.root, "AGENTS.md"), "utf8");
     expect(text).not.toContain("old rules");
     expect(text).toMatch(/^before\n/);
     expect(text).toMatch(/\nafter\n$/);
-    expect(await readFile(resolve(f.root, "CLAUDE.md"), "utf8")).toBe(
-      "@AGENTS.md\n\nKeep Claude rules.\n",
-    );
-    expect(JSON.parse((await run(f.root, "claude")).stdout).changedFiles).toEqual([]);
+    const claude = await readFile(resolve(f.root, "CLAUDE.md"), "utf8");
+    expect(claude).toMatch(/^@AGENTS.md\n\nKeep Claude rules.\n/);
+    expect(claude).toContain("attach_project");
+    expect(claude).toContain("diagnosticLimit");
+    expect(claude.split("<!-- integra-code-memory:start -->")).toHaveLength(2);
+    expect(JSON.parse((await run(f.root, "both")).stdout).changedFiles).toEqual([]);
   } finally {
     await f.dispose();
   }
@@ -269,15 +277,23 @@ it("upgrades recognizable connections with backups while preserving unrelated se
     const codexPath = resolve(f.root, ".codex/config.toml"),
       claudePath = resolve(f.root, ".mcp.json");
     const oldEntry = resolve(f.root, "old-release/apps/cli/src/index.ts");
-    const originalCodex = await readFile(codexPath, "utf8");
+    const originalCodex = (await readFile(codexPath, "utf8")).replace(', "--session-projects"', "");
     const oldCodex = `${originalCodex.replace(
       JSON.stringify(resolve(f.root, "state/integra-code-memory/cli/mcp.ts")),
       JSON.stringify(oldEntry),
     )}\n[mcp_servers.other]\ncommand = "keep-me"\n`;
     const oldClaude = JSON.parse(await readFile(claudePath, "utf8"));
     oldClaude.mcpServers.integra_code_memory.args[0] = oldEntry;
+    oldClaude.mcpServers.integra_code_memory.args =
+      oldClaude.mcpServers.integra_code_memory.args.filter(
+        (arg: string) => arg !== "--session-projects",
+      );
     oldClaude.mcpServers.integra_code_memory.env = { DATABASE_URL: "private-existing-database" };
     oldClaude.mcpServers.other = { command: "keep-me" };
+    await writeFile(
+      resolve(f.root, "CLAUDE.md"),
+      "User prefix\n<!-- integra-code-memory:start -->\n@AGENTS.md\n<!-- integra-code-memory:end -->\nUser suffix\n",
+    );
     await writeFile(codexPath, oldCodex);
     await writeFile(claudePath, JSON.stringify(oldClaude));
     await expect(apply("--write")).rejects.toBeDefined();
@@ -293,6 +309,8 @@ it("upgrades recognizable connections with backups while preserving unrelated se
     );
     expect(await readFile(codexPath, "utf8")).toContain('command = "keep-me"');
     const now = JSON.parse(await readFile(claudePath, "utf8"));
+    expect(now.mcpServers.integra_code_memory.args).toContain("--session-projects");
+    expect(await readFile(codexPath, "utf8")).toContain("--session-projects");
     expect(now.mcpServers.integra_code_memory.args[0]).toBe(
       resolve(f.root, "state/integra-code-memory/cli/mcp.ts"),
     );
@@ -300,6 +318,12 @@ it("upgrades recognizable connections with backups while preserving unrelated se
       oldClaude.mcpServers.integra_code_memory.env,
     );
     expect(now.mcpServers.other).toEqual({ command: "keep-me" });
+    const updatedRules = await readFile(resolve(f.root, "CLAUDE.md"), "utf8");
+    expect(updatedRules).toMatch(/^User prefix\n/);
+    expect(updatedRules).toMatch(/\nUser suffix\n$/);
+    expect(updatedRules).not.toContain("@AGENTS.md");
+    expect(updatedRules).toContain("attach_project");
+    expect(updatedRules).toContain("diagnosticLimit");
     expect(JSON.parse((await apply("--upgrade", "--write")).stdout).changedFiles).toEqual([]);
     now.mcpServers.integra_code_memory.args[3] = resolve(f.root, "different-project");
     await writeFile(claudePath, JSON.stringify(now));

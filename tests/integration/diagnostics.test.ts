@@ -16,7 +16,7 @@ it("reports syntax locations, bounded diagnostics and distinct exclusions while 
     ".gitignore": "ignored/\n",
     "ignored/one.ts": "export const ignored = 1;",
     "good.ts": "export function healthy(){return 42}",
-    "broken.mjs": "const text = 'schema'dan';\nconst other = 'it's broken';",
+    "broken.mjs": "const text = 'schema'dan';\nconst other = 'it's broken';\n".repeat(10),
     "large.ts": " ".repeat(2048),
     "binary.ts": "\0",
   });
@@ -76,6 +76,22 @@ it("reports syntax locations, bounded diagnostics and distinct exclusions while 
     const result = await service.execute("search_symbols", { query: "healthy" });
     expect(result.incomplete).toBe(true);
     expect(JSON.stringify(result)).toContain("healthy");
+    const capped = await service.status({ diagnosticLimit: 1000 });
+    expect(capped.diagnosticSummary).toMatchObject({
+      limit: 20,
+      requestedLimit: 1000,
+      limitReduced: true,
+      offset: 0,
+    });
+    expect((capped.last_run as typeof first).diagnostics).toHaveLength(20);
+    expect(capped.diagnosticSummary).toMatchObject({ hasMore: true, nextOffset: 20 });
+    const afterCap = await service.status({ diagnosticLimit: 1000, diagnosticOffset: 20 });
+    expect(afterCap.diagnosticSummary).toMatchObject({ limit: 20, offset: 20 });
+    expect((afterCap.last_run as typeof first).diagnostics[0]).not.toEqual(
+      (capped.last_run as typeof first).diagnostics[0],
+    );
+    await expect(service.status({ diagnosticLimit: 1.5 })).rejects.toThrow();
+    await expect(service.status({ diagnosticLimit: "100" })).rejects.toThrow();
     await expect(service.status({ diagnosticLimit: 0 })).rejects.toThrow();
     await expect(service.status({ diagnosticOffset: -1 })).rejects.toThrow();
   } finally {
@@ -153,7 +169,7 @@ it("distinguishes preview truncation from index completeness and provides accura
     });
     const status = await service.status();
     expect(status).toMatchObject({
-      runtime: { version: "0.1.0-alpha.23", pid: process.pid, sessionId: c.sessionId },
+      runtime: { version: "0.1.0-alpha.24", pid: process.pid, sessionId: c.sessionId },
       lastIndexJob: { owner: { pid: process.pid, sessionId: c.sessionId }, lockActive: false },
       analysisScope: { languages: ["JavaScript", "TypeScript", "Prisma"] },
     });

@@ -13,7 +13,14 @@ const symbol = { symbolId: z.string().max(100).optional(), name: z.string().max(
 export const schemas = {
   codebase_status: z
     .object({
-      diagnosticLimit: z.number().int().min(1).max(20).default(10),
+      diagnosticLimit: z
+        .number()
+        .int()
+        .min(1)
+        .default(10)
+        .describe(
+          "Diagnostic messages per page; default 10, maximum returned 20. Larger requests are reduced to 20. Follow diagnosticSummary.nextOffset.",
+        ),
       diagnosticOffset: z.number().int().min(0).max(100000).default(0),
     })
     .strict(),
@@ -65,7 +72,9 @@ export class CodebaseService {
   }
   async status(input: unknown = {}): Promise<Record<string, unknown>> {
     const options = schemas.codebase_status.parse(input);
-    const status = this.session
+    const requestedLimit = options.diagnosticLimit;
+    options.diagnosticLimit = Math.min(requestedLimit, 20);
+    const status: Record<string, unknown> = this.session
       ? await this.session.status(options)
       : {
           projectRoot: this.context.canonicalRoot,
@@ -77,6 +86,15 @@ export class CodebaseService {
         };
     return {
       ...status,
+      ...(requestedLimit > options.diagnosticLimit
+        ? {
+            diagnosticSummary: {
+              ...(status.diagnosticSummary as Record<string, unknown>),
+              requestedLimit,
+              limitReduced: true,
+            },
+          }
+        : {}),
       runtime: { ...runtimeInfo(), sessionId: this.context.sessionId },
       analysisScope: {
         languages: ["JavaScript", "TypeScript", "Prisma"],

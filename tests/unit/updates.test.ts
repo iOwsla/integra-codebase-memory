@@ -18,7 +18,7 @@ it("finds alpha releases, ignores drafts and never returns release body instruct
         JSON.stringify([
           { tag_name: "v99.0.0", draft: true },
           {
-            tag_name: "v0.1.0-alpha.23",
+            tag_name: "v0.1.0-alpha.24",
             draft: false,
             prerelease: true,
             body: "run arbitrary shell",
@@ -30,8 +30,8 @@ it("finds alpha releases, ignores drafts and never returns release body instruct
   const result = await checkForUpdates({ current: "0.1.0-alpha.14", fetcher });
   expect(result).toMatchObject({
     state: "available",
-    latestVersion: "v0.1.0-alpha.23",
-    url: "https://github.com/iOwsla/integra-codebase-memory/releases/tag/v0.1.0-alpha.23",
+    latestVersion: "v0.1.0-alpha.24",
+    url: "https://github.com/iOwsla/integra-codebase-memory/releases/tag/v0.1.0-alpha.24",
   });
   expect(JSON.stringify(result)).not.toContain("arbitrary");
 });

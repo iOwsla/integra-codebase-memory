@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createProjectContext } from "@codememory/shared";
 import { eventually, fixture, testDatabase } from "@codememory/test-utils";
 import { Client } from "@modelcontextprotocol/client";
@@ -49,6 +51,175 @@ describe("real Bun CLI and MCP STDIO", () => {
       await f.dispose();
     }
   });
+  it.each([false, true])(
+    "attaches registered session projects automatically (client roots: %s)",
+    async (rootsSupported) => {
+      const a = await fixture({ "a.ts": "export const alphaSession = 1" });
+      const b = await fixture({ "b.ts": "export const betaSession = 2" });
+      const other = await fixture({ "c.ts": "export const unrelated = 3" });
+      const disabled = await fixture({ "d.ts": "export const disabledProject = 4" });
+      const record = (root: string, enabled = true) => ({
+        root,
+        enabled,
+        managed: false,
+        client: "both",
+      });
+      const records = [record(b.root), record(other.root), record(disabled.root, false)];
+      const state = await fixture(
+        Object.fromEntries(
+          records.map((r) => [
+            `cli/projects/${createHash("sha256").update(r.root).digest("hex")}.json`,
+            JSON.stringify(r),
+          ]),
+        ),
+      );
+      const transport = new StdioClientTransport({
+        command: "bun",
+        args: [entry, "mcp", "--project", a.root, "--session-projects", "--auto-index", "--watch"],
+        env: {
+          ...Object.fromEntries(
+            Object.entries(process.env).filter(
+              (e): e is [string, string] => typeof e[1] === "string",
+            ),
+          ),
+          DATABASE_URL: db.url,
+          CODEMEMORY_SERVICE_DIR: resolve(state.root, "service"),
+        },
+        stderr: "pipe",
+      });
+      transport.stderr?.on("data", () => {});
+      const client = new Client(
+        { name: "session-test", version: "1" },
+        { capabilities: rootsSupported ? { roots: {} } : {} },
+      );
+      if (rootsSupported)
+        client.setRequestHandler("roots/list", async () => ({
+          roots: [{ uri: pathToFileURL(b.root).href }, { uri: pathToFileURL(disabled.root).href }],
+        }));
+      try {
+        await client.connect(transport);
+        const call = (name: string, args: Record<string, unknown> = {}) =>
+          client.callTool({ name, arguments: args });
+        const listed = await call("list_projects");
+        expect(JSON.stringify(listed.structuredContent)).not.toContain(other.root);
+        expect(JSON.stringify(listed.structuredContent)).not.toContain(disabled.root);
+        if (rootsSupported) expect(JSON.stringify(listed.structuredContent)).toContain(b.root);
+        else expect(JSON.stringify(listed.structuredContent)).not.toContain(b.root);
+        const attached = await call("attach_project", { projectRoot: b.root });
+        expect(attached.isError).not.toBe(true);
+        const project = (attached.structuredContent as Record<string, unknown>).projectScopeId;
+        // Concurrent/repeated attachment must not create duplicate sessions.
+        await Promise.all([
+          call("attach_project", { projectRoot: b.root }),
+          call("attach_project", { projectRoot: b.root }),
+        ]);
+        const listedAgain = await call("list_projects");
+        expect(
+          ((listedAgain.structuredContent as Record<string, unknown>).projects as unknown[]).length,
+        ).toBe(2);
+        expect((await call("attach_project", { projectRoot: disabled.root })).isError).toBe(true);
+        expect((await call("attach_project", { projectRoot: state.root })).isError).toBe(true);
+        expect((await call("attach_project", { projectRoot: "../relative" })).isError).toBe(true);
+        expect((await call("codebase_status")).isError).toBe(true);
+        await eventually(async () => {
+          const result = await call("codebase_status", { project });
+          return Number((result.structuredContent as Record<string, unknown>).indexVersion) > 0;
+        }, 20000);
+        const found = await call("search_symbols", { project, query: "betaSession" });
+        expect(JSON.stringify(found.structuredContent)).toContain("betaSession");
+      } finally {
+        await client.close();
+        await Promise.all([
+          a.dispose(),
+          b.dispose(),
+          other.dispose(),
+          disabled.dispose(),
+          state.dispose(),
+        ]);
+      }
+    },
+  );
+  it("routes a multi-project connection without mixing queries or memories", async () => {
+    const a = await fixture({ "a.ts": "export function onlyAlpha(){return 1}" });
+    const b = await fixture({ "b.ts": "export function onlyBeta(){return 2}" });
+    const transport = new StdioClientTransport({
+      command: "bun",
+      args: [entry, "mcp", "--project", a.root, "--project", b.root, "--auto-index", "--watch"],
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter(
+            (e): e is [string, string] => typeof e[1] === "string",
+          ),
+        ),
+        DATABASE_URL: db.url,
+      },
+      stderr: "pipe",
+    });
+    transport.stderr?.on("data", () => {});
+    const client = new Client({ name: "workspace-test", version: "1" });
+    try {
+      await client.connect(transport);
+      const call = (name: string, args: Record<string, unknown> = {}) =>
+        client.callTool({ name, arguments: args });
+      const listed = await call("list_projects");
+      const projects = (
+        listed.structuredContent as { projects: { projectScopeId: string; projectRoot: string }[] }
+      ).projects;
+      expect(projects.map((p) => p.projectRoot).sort()).toEqual([a.root, b.root].sort());
+      const aid = projects.find((p) => p.projectRoot === a.root)!.projectScopeId;
+      const bid = projects.find((p) => p.projectRoot === b.root)!.projectScopeId;
+      for (const project of [aid, bid])
+        await eventually(async () => {
+          const r = await call("codebase_status", { project });
+          return Number((r.structuredContent as Record<string, unknown>)?.indexVersion) > 0;
+        }, 20000);
+      expect((await call("search_symbols", { query: "onlyAlpha" })).isError).toBe(true);
+      expect(
+        (await call("search_symbols", { project: "unlisted", query: "onlyAlpha" })).isError,
+      ).toBe(true);
+      const [ar, br] = await Promise.all([
+        call("search_symbols", { project: aid, query: "onlyAlpha" }),
+        call("search_symbols", { project: bid, query: "onlyBeta" }),
+      ]);
+      expect(JSON.stringify(ar.structuredContent)).toContain("onlyAlpha");
+      expect(JSON.stringify(br.structuredContent)).toContain("onlyBeta");
+      expect((ar.structuredContent as Record<string, unknown>)?.projectScopeId).toBe(aid);
+      const symbol = (
+        (ar.structuredContent as Record<string, unknown>).results as { id: string }[]
+      )[0]!;
+      expect((await call("get_symbol", { project: bid, symbolId: symbol.id })).isError).toBe(true);
+      expect(
+        (
+          await call("remember", {
+            project: aid,
+            title: "Workspace decision",
+            content: "Alpha secret decision",
+            type: "NOTE",
+            scope: { type: "repository" },
+          })
+        ).isError,
+      ).not.toBe(true);
+      expect(
+        JSON.stringify(
+          (await call("search_memory", { project: bid, query: "Alpha secret decision" }))
+            .structuredContent,
+        ),
+      ).not.toContain("Alpha secret decision");
+      await writeFile(resolve(b.root, "b.ts"), "export function betaChanged(){return 3}");
+      await eventually(
+        async () =>
+          JSON.stringify(
+            (await call("search_symbols", { project: bid, query: "betaChanged" }))
+              .structuredContent,
+          ).includes('"name":"betaChanged"'),
+        20000,
+      );
+    } finally {
+      await client.close();
+      await a.dispose();
+      await b.dispose();
+    }
+  });
   it("MCP initializes, exposes structured search/callers and rejects scope injection", async () => {
     const f = await fixture({
       "math.ts": "export function add(){return 1}",
@@ -80,6 +251,18 @@ describe("real Bun CLI and MCP STDIO", () => {
       await eventually(async () => {
         const r = await client.callTool({ name: "codebase_status", arguments: {} });
         return Number((r.structuredContent as Record<string, unknown>)?.indexVersion) > 0;
+      });
+      const cappedStatus = await client.callTool({
+        name: "codebase_status",
+        arguments: { diagnosticLimit: 1000 },
+      });
+      expect(cappedStatus.isError).not.toBe(true);
+      expect(
+        (cappedStatus.structuredContent as Record<string, unknown>).diagnosticSummary,
+      ).toMatchObject({
+        limit: 20,
+        requestedLimit: 1000,
+        limitReduced: true,
       });
       const symbols = await client.callTool({
         name: "search_symbols",

@@ -7,7 +7,7 @@ import { CodebaseService } from "@codememory/application";
 import { CodeMemoryError } from "@codememory/core";
 import { PostgresStore } from "@codememory/database";
 import { IndexService, ProjectSession, RepositoryScanner } from "@codememory/indexer";
-import { runMcp } from "@codememory/mcp-server";
+import { runMcpWorkspace } from "@codememory/mcp-server";
 import { TypeScriptPlugin } from "@codememory/plugin-typescript";
 import { ProcessTypeScriptPlugin } from "@codememory/plugin-typescript/process";
 import {
@@ -25,7 +25,7 @@ import { databaseUrl, readService } from "../../../scripts/setup/service-state";
 const cli = new Command()
   .name("codememory")
   .description("Local, explicitly project-scoped code intelligence")
-  .version("0.1.0-alpha.23")
+  .version("0.1.0-alpha.24")
   .enablePositionalOptions();
 registerManagementCommands(cli);
 cli
@@ -139,7 +139,11 @@ for (const [command, tool] of [
 scoped("status", "Selected project status; --watch follows the durable index stages")
   .option("--watch", "Refresh status every two seconds until Ctrl+C; does not start indexing")
   .option("--json", "With --watch, emit JSON lines instead of a terminal display")
-  .option("--diagnostic-limit <number>", "Diagnostic messages per page (1–20)", "10")
+  .option(
+    "--diagnostic-limit <number>",
+    "Diagnostic messages per page (default 10; requests above 20 are reduced)",
+    "10",
+  )
   .option("--diagnostic-offset <number>", "Diagnostic message offset", "0")
   .action(async (options) => {
     const context = await createProjectContext(options.project ?? process.cwd());
@@ -319,22 +323,92 @@ scoped("debug <subject>", "Inspect unresolved references or effective config").a
 cli
   .command("mcp")
   .description("Start session-scoped MCP over STDIO")
-  .option("--project <absolute-path>", "Required explicit project root")
+  .option(
+    "--project <absolute-path>",
+    "Explicit project root; repeat to allow multiple projects",
+    collect,
+    [],
+  )
+  .option(
+    "--session-projects",
+    "Allow client roots and AI attachment of registered session projects",
+  )
   .option("--auto-index", "Reconcile selected project after startup")
   .option("--watch", "Watch selected project for the lifetime of this process")
   .action(async (options) => {
-    const context = await createProjectContext(options.project);
-    const store = await selectedStore(context.canonicalRoot);
-    const indexer = new IndexService(
-      context,
-      store,
-      new RepositoryScanner(),
-      new ProcessTypeScriptPlugin(),
+    if (!options.project.length) await createProjectContext(undefined);
+    // Validate every root before opening any database or starting any watcher.
+    const contexts = await Promise.all(
+      options.project.map((root: string) => createProjectContext(root)),
     );
-    await runMcp(
-      new ProjectSession(context, store, indexer, !!options.autoIndex, !!options.watch),
-      store,
-    );
+    const unique = [
+      ...new Map(contexts.map((context) => [context.projectScopeId, context])).values(),
+    ];
+    if (unique.length > 16)
+      throw new CodeMemoryError("INVALID_ARGUMENT", "At most 16 workspace projects are supported");
+    const entries: { session: ProjectSession; store: PostgresStore }[] = [];
+    try {
+      for (const context of unique) {
+        const store = await selectedStore(context.canonicalRoot);
+        const indexer = new IndexService(
+          context,
+          store,
+          new RepositoryScanner(),
+          new ProcessTypeScriptPlugin(),
+        );
+        entries.push({
+          store,
+          session: new ProjectSession(
+            context,
+            store,
+            indexer,
+            !!options.autoIndex,
+            !!options.watch,
+          ),
+        });
+      }
+      await runMcpWorkspace(
+        entries,
+        options.sessionProjects
+          ? async (root: string) => {
+              const context = await createProjectContext(root);
+              const registration = (await listRegistrations()).find(
+                (p) => p.root === context.canonicalRoot && p.enabled,
+              );
+              if (!registration)
+                throw new CodeMemoryError(
+                  "INVALID_ARGUMENT",
+                  "Project is not registered and enabled. Register this exact project before attaching it.",
+                );
+              const store = await selectedStore(context.canonicalRoot);
+              const indexer = new IndexService(
+                context,
+                store,
+                new RepositoryScanner(),
+                new ProcessTypeScriptPlugin(),
+              );
+              return {
+                store,
+                session: new ProjectSession(
+                  context,
+                  store,
+                  indexer,
+                  !!options.autoIndex,
+                  !!options.watch,
+                ),
+              };
+            }
+          : undefined,
+      );
+    } catch (error) {
+      await Promise.all(
+        entries.map(async ({ session, store }) => {
+          await session.close();
+          await store.close();
+        }),
+      );
+      throw error;
+    }
   });
 scoped("watch [path]", "Watch selected project until SIGINT or SIGTERM").action(
   async (_path: string | undefined, options: { project: string }) => {

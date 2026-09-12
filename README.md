@@ -22,7 +22,7 @@ A function name is only the beginning. Safe changes also require knowing who cal
 
 CodeMemory builds a local, queryable graph for a project you explicitly select. Your agent can follow relationships, retrieve focused source context and recall decisions you asked it to save. One shared installation serves your registered projects; each MCP connection stays bound to its own project.
 
-**Current release: `0.1.0-alpha.23`.** Available for early adopters on Windows, macOS and Linux. The release pipeline tests all three platforms; sustained large-repository and production acceptance remain [open gates](docs/release-readiness.md).
+**Current release: `0.1.0-alpha.24`.** Available for early adopters on Windows, macOS and Linux. The release pipeline tests all three platforms; sustained large-repository and production acceptance remain [open gates](docs/release-readiness.md).
 
 ## What you can do
 
@@ -65,7 +65,7 @@ Choose `codex`, `claude` or `both`. The examples below configure both clients. O
 ### macOS and Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.23/bootstrap.sh | sh -s -- --project "$PWD" --client both --write
+curl -fsSL https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.24/bootstrap.sh | sh -s -- --project "$PWD" --client both --write
 export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/integra-code-memory/cli/bin:$PATH"
 ```
 
@@ -74,7 +74,7 @@ Add the printed CLI directory to your shell profile to retain it in future termi
 ### Windows PowerShell 5.1 or 7
 
 ```powershell
-$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.23/bootstrap.ps1').Content
+$installer = (Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/iOwsla/integra-codebase-memory/v0.1.0-alpha.24/bootstrap.ps1').Content
 & ([scriptblock]::Create($installer)) -Project (Get-Location).Path -Client both -Write
 ```
 
@@ -124,7 +124,7 @@ codememory update   # Install it into the shared runtime
 On Windows, `codememory.cmd` is also available. If an older PATH entry prevents command discovery:
 
 ```powershell
-& "$env:LOCALAPPDATA\integra-code-memory\cli\bin\codememory.cmd" update --version v0.1.0-alpha.23
+& "$env:LOCALAPPDATA\integra-code-memory\cli\bin\codememory.cmd" update --version v0.1.0-alpha.24
 ```
 
 The updater validates the release, preflights enabled registrations, backs up changed settings and stops verified CodeMemory processes before switching the shared runtime. Project scopes and index data are preserved. Reconnect open MCP clients afterward. Update checks do not install releases in the background; set `CODEMEMORY_UPDATE_CHECK=0` to disable checks.
@@ -210,3 +210,24 @@ If CodeMemory helps your workflow, star the repository and share a reproducible,
 ## License
 
 [MIT](LICENSE) — Copyright © 2026 CodeMemory contributors.
+
+
+### Two projects in one conversation
+
+Register each project once. The installer enables session project attachment for
+Codex and Claude Code and installs the instructions that let the agent handle it.
+The agent calls `list_projects`; registered roots reported by the client are
+attached automatically. For another project the user opened in the conversation,
+the agent can call `attach_project` without editing MCP configuration.
+
+Queries and memory writes use the returned `projectScopeId` as `project`.
+Only attached projects are accessible; this does not index every registered
+project. Existing installations need an installer upgrade and MCP reconnect.
+See [session project attachment](docs/project-isolation.md#automatic-session-project-attachment)
+for client limitations and lifecycle details.
+
+For manual fixed scopes, repeat `--project`:
+
+```sh
+codememory mcp --project /absolute/project-x --project /absolute/project-y --auto-index --watch
+```

@@ -382,3 +382,17 @@ source retention and root ignore-file negation boundaries. Database regressions
 verify ignore-file creation/deletion removes/restores diagnostics and graph
 entries while real-source binary failures remain incomplete. Native Windows
 workflow includes the new scope cases; publication still requires its success.
+
+## Alpha.24 session projects and instruction refresh (2026-09-12)
+
+Local frozen installation, lint, typecheck, build and all 169 tests across 29
+files passed. Real STDIO tests cover fixed and dynamic project routing, roots
+discovery, duplicate attachment, rejected unregistered/disabled roots, separate
+symbol/memory scopes and watcher reconciliation. Installer/update tests cover
+full AGENTS.md and CLAUDE.md blocks, legacy import migration, preserved external
+rules and repeated installs. Diagnostic tests cover oversized page requests
+through STDIO and bounded database pages with continuation metadata.
+
+Native Codex/Claude agent behavior has not been verified separately. Publication
+still requires the tagged platform workflow checks. No production acceptance
+gate is closed by these local results.

@@ -74,7 +74,8 @@ function upgradedEntry(actual: unknown, expected: Record<string, unknown>) {
     !["bun", "bun.exe"].includes(basename(actual.command)) ||
     typeof old[0] !== "string" ||
     !isAbsolute(old[0]) ||
-    JSON.stringify(old.slice(1)) !== JSON.stringify(next.slice(1))
+    JSON.stringify(old.slice(1).filter((v) => v !== "--session-projects")) !==
+      JSON.stringify(next.slice(1).filter((v) => v !== "--session-projects"))
   )
     throw new Error(
       "Upgrade requires an existing Bun MCP entry for this exact project with standard arguments.",
@@ -175,7 +176,15 @@ export async function installProject(
     throw new Error(
       "Selected runtime executable or MCP entry is missing; reinstall this release before updating project settings",
     );
-  const args = [entry, "mcp", "--project", selected, "--auto-index", "--watch"];
+  const args = [
+    entry,
+    "mcp",
+    "--project",
+    selected,
+    "--auto-index",
+    "--watch",
+    "--session-projects",
+  ];
   if (client !== "claude") {
     // Reuse the existing Codex configuration generator without writing anything.
     const generated =
@@ -235,14 +244,24 @@ export async function installProject(
       return `${JSON.stringify({ ...parsed, mcpServers: { ...servers, [name]: expected } }, null, 2)}\n`;
     });
   }
-  const template = await readFile(resolve(serverRoot, "docs/instructions/AGENTS.md"), "utf8");
-  const body = template.slice(template.indexOf(start) + start.length, template.indexOf(end)).trim();
-  const claude = client !== "codex" ? await readTarget(selected, "CLAUDE.md") : null;
-  const importsAgents = /^@(?:\.\/)?AGENTS\.md\s*$/m.test(claude?.text ?? "");
-  if (client !== "claude" || importsAgents)
-    await plan("AGENTS.md", (before) => marked(before, body));
-  if (client !== "codex" && !importsAgents)
-    await plan("CLAUDE.md", (before) => marked(before, client === "both" ? "@AGENTS.md" : body));
+  for (const file of ["AGENTS.md", "CLAUDE.md"] as const) {
+    if (
+      (file === "AGENTS.md" && client === "claude") ||
+      (file === "CLAUDE.md" && client === "codex")
+    )
+      continue;
+    const template = await readFile(resolve(serverRoot, "docs/instructions", file), "utf8");
+    if (
+      template.split(start).length !== 2 ||
+      template.split(end).length !== 2 ||
+      template.indexOf(end) < template.indexOf(start)
+    )
+      throw new Error(`Invalid instruction template: ${file}`);
+    const body = template
+      .slice(template.indexOf(start) + start.length, template.indexOf(end))
+      .trim();
+    await plan(file, (before) => marked(before, body));
+  }
   await plan(".gitignore", (before) =>
     marked(
       before,

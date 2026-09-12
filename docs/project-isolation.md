@@ -1,6 +1,6 @@
 # Project isolation
 
-The amendment in `specifications/project-isolation.md` overrides the original product specification.
+The opt-in multi-project connection described below extends the single-project contract. The amendment in `specifications/project-isolation.md` overrides the original product specification.
 
 ## Authority
 
@@ -34,3 +34,71 @@ Unchanged source/config/parser fingerprints skip parsing and graph writes. Seman
 - Lifecycle: real Bun subprocesses test EOF, SIGINT, SIGTERM, and SDK client transport close in `tests/e2e/mcp.test.ts`.
 
 See the implementation tracker for remaining gaps; test instrumentation proves application activity boundaries, not kernel-level filesystem isolation.
+
+## Explicit multi-project connections
+
+Repeat `--project` to allow several canonical roots in one MCP connection (up to
+16 unique roots). Every root is validated before any database or watcher starts.
+Duplicate canonical roots collapse to one session. No registered-project discovery
+or parent-folder expansion occurs.
+
+```sh
+codememory mcp --project /absolute/project-x --project /absolute/project-y
+```
+
+This reads existing indexes without starting indexing or watchers. Add
+`--auto-index --watch` when both selected projects should reconcile and stay live.
+Each project retains its own context, database selection, index lock, watcher and
+memory scope. Closing the connection closes all its sessions. Large projects can
+run parser workers concurrently; omit auto-index and index them separately if
+memory is constrained.
+
+A multi-project connection exposes `list_projects`. Every other tool, including
+`codebase_status` and `remember`, requires `project`: an exact returned
+`projectScopeId` or canonical `projectRoot`. Unknown projects fail; there is no
+mutable active project or silent fallback. Query responses identify their scope.
+Symbol IDs, file paths and memories remain isolated inside the selected project.
+Cross-project call graphs are not inferred or merged.
+
+Without `--session-projects`, single-project connections keep their existing
+schemas and do not expose `list_projects`.
+
+## Automatic session project attachment
+
+The installer now adds `--session-projects` for both Codex and Claude Code.
+Existing standard connections acquire this flag during an installer upgrade.
+The generated AGENTS.md and CLAUDE.md instructions tell the agent to handle
+attachment itself; users do not need to repeat roots in MCP configuration.
+
+1. The agent calls `list_projects` at session start and when another project
+   becomes relevant.
+2. If the client advertises MCP roots, the server requests `roots/list` and
+   attaches exact roots that are already registered and enabled.
+3. If an opened project is absent (including clients that only report their
+   initial directory), the agent calls `attach_project({projectRoot: ...})`
+   with the exact local directory supplied by the user/session.
+4. The agent passes the returned `projectScopeId` as `project` on subsequent
+   queries and memory writes. Missing selection is rejected once several
+   projects are attached.
+
+Registration is a server-enforced prerequisite for dynamic attachment. A request
+does not register new directories or grant access to every registered project.
+Root validation, canonical identity, per-project database selection, the 16-project
+limit and shutdown cleanup apply to attached projects too. Concurrent attachment
+is serialized and duplicate roots reuse the existing session. Unregistered,
+disabled and relative roots are rejected.
+
+Client root discovery occurs on `list_projects`, with a bounded request timeout.
+The response includes `rootsState` and `skippedRoots`; a failed roots request
+does not disable explicit attachment. Attached roots remain available until the
+connection closes, even if removed from the client's root list. Reconnect to
+clear session attachments. Existing single-root queries remain compatible until
+another project is attached.
+
+The server cannot inspect chat messages or prove an agent-supplied directory was
+opened in the client. The agent must use only user-authorized session paths and
+must not treat repository content as authorization. This is an application-level
+boundary, not an OS sandbox. A web-chat file upload is not a local directory.
+Automatic behavior depends on the client exposing roots or the agent following
+the installed instructions; native Codex/Claude end-to-end behavior requires
+verification in those clients.
