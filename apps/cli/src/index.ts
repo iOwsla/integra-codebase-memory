@@ -21,12 +21,13 @@ import { assertProjectEnabled, listRegistrations } from "../../../scripts/setup/
 import { managementError, registerManagementCommands } from "../../../scripts/setup/management";
 import { CliProgress } from "../../../scripts/setup/progress";
 import { databaseUrl, readService } from "../../../scripts/setup/service-state";
+import { registerHistoryCommands } from "./history";
 import { registerMemoryCommands } from "./memory";
 
 const cli = new Command()
   .name("codememory")
   .description("Local, explicitly project-scoped code intelligence")
-  .version("0.1.0-alpha.28")
+  .version("0.1.0-alpha.29")
   .enablePositionalOptions();
 registerManagementCommands(cli);
 cli
@@ -64,6 +65,7 @@ async function open(project?: string, progress?: CliProgress) {
   return { context, store, indexer, service };
 }
 registerMemoryCommands(cli, open);
+registerHistoryCommands(cli, open);
 const scoped = (name: string, description: string) =>
   cli
     .command(name)

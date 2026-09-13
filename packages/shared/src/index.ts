@@ -140,4 +140,5 @@ export function publicError(error: unknown): {
 }
 export const projectName = (context: ProjectContext) => basename(context.canonicalRoot);
 
+export { type GitChange, GitCli } from "./git";
 export { checkForUpdates, newerRelease } from "./updates";

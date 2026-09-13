@@ -270,3 +270,4 @@ export class ProjectSession {
     return this.stopped;
   }
 }
+export { watchPolicy } from "./watch-policy";

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.29 — 2026-09-14
+
+- Add opt-in Markdown and active-branch Git history collection with bounded, resumable jobs, exact source evidence and staged/unstaged observations.
+- Add project-scoped history CLI/MCP queries, current source freshness, reviewed document rules and recall evidence links.
+- Add migration 7, indexed excerpt search, quotas, retention, scoped backup and transactional restore.
+- Keep model transmission separately opt-in and permanent rule promotion subject to explicit approval. Refresh English AGENTS.md and CLAUDE.md guidance.
+
+
 ## 0.1.0-alpha.28 — 2026-09-13
 
 - Define semantic memory capture triggers and pending-review guidance in both client instructions and MCP status/tool descriptions.

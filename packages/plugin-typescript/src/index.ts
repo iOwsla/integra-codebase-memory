@@ -551,3 +551,4 @@ export class TypeScriptPlugin implements LanguagePlugin {
     return result;
   }
 }
+export { prismaSourceLocators } from "./prisma-schema";

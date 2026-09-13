@@ -1,16 +1,16 @@
 {
-  "name": "@codememory/mcp-server",
+  "name": "@codememory/history",
   "version": "0.1.0-alpha.29",
   "private": true,
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
-    "@codememory/application": "workspace:*",
     "@codememory/core": "workspace:*",
     "@codememory/indexer": "workspace:*",
     "@codememory/memory": "workspace:*",
+    "@codememory/plugin-typescript": "workspace:*",
     "@codememory/shared": "workspace:*",
-    "@modelcontextprotocol/server": "^2.0.0",
-    "@codememory/history": "workspace:*"
+    "picomatch": "^4.0.7",
+    "zod": "^4.6.2"
   }
 }

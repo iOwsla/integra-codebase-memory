@@ -7,6 +7,7 @@ const packages = [
   "database",
   "indexer",
   "graph",
+  "history",
   "search",
   "memory",
   "mcp-server",

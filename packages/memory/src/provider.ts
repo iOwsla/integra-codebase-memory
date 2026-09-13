@@ -178,7 +178,10 @@ export function providerExitError(code: number | null, stderr: string) {
   );
 }
 export class CliMemoryProvider implements MemoryModelProvider {
-  constructor(private readonly runner: ProcessRunner = runModelProcess) {}
+  constructor(
+    private readonly runner: ProcessRunner = runModelProcess,
+    private readonly prompts = { extraction: extractionPrompt, verification: verificationPrompt },
+  ) {}
   async extract(input: unknown, signal?: AbortSignal) {
     return this.call("spark", input, signal);
   }
@@ -239,7 +242,7 @@ export class CliMemoryProvider implements MemoryModelProvider {
         ])
           args.push("--disable", feature);
         args.push("-");
-        prompt = `${extractionPrompt}\n${JSON.stringify(input)}`;
+        prompt = `${this.prompts.extraction}\n${JSON.stringify(input)}`;
       } else {
         args = [
           "-p",
@@ -254,7 +257,7 @@ export class CliMemoryProvider implements MemoryModelProvider {
           "",
           "--no-session-persistence",
           "--system-prompt",
-          verificationPrompt,
+          this.prompts.verification,
           "--output-format",
           "json",
           "--json-schema",

@@ -371,3 +371,39 @@ export class PrismaCatalog {
     return symbol;
   }
 }
+
+/** Bounded syntactic history locators; callers must resolve semantic usage in the current graph. */
+export function prismaSourceLocators(source: string) {
+  const locators: {
+    name: string;
+    kind: string;
+    startLine: number;
+    endLine: number;
+    hash: string;
+  }[] = [];
+  try {
+    const ast = parsePrismaSchema(maskPrismaBlockComments(source));
+    for (const declaration of ast.declarations) {
+      if (!("name" in declaration) || !declaration.location) continue;
+      const add = (name: string, kind: string, range: SourceRange | undefined) => {
+        if (range && locators.length < 100)
+          locators.push({
+            name,
+            kind,
+            startLine: range.start.line,
+            endLine: range.end.line,
+            hash: hash(source.slice(range.start.offset, range.end.offset)),
+          });
+      };
+      add(declaration.name.value, declaration.kind, declaration.location);
+      if ("members" in declaration)
+        for (const member of declaration.members) {
+          if (member.kind === "field")
+            add(`${declaration.name.value}.${member.name.value}`, "FIELD", member.location);
+        }
+    }
+    return { locators, coverage: locators.length >= 100 ? "LOCATORS_TRUNCATED" : "SYNTACTIC_ONLY" };
+  } catch {
+    return { locators, coverage: "PARSE_ERRORS" };
+  }
+}

@@ -26,7 +26,7 @@
     },
     "apps/cli": {
       "name": "@codememory/cli",
-      "version": "0.1.0-alpha.23",
+      "version": "0.1.0-alpha.28",
       "bin": {
         "codememory": "./src/index.ts",
       },
@@ -43,10 +43,11 @@
     },
     "packages/application": {
       "name": "@codememory/application",
-      "version": "0.1.0-alpha.23",
+      "version": "0.1.0-alpha.28",
       "dependencies": {
         "@codememory/core": "workspace:*",
         "@codememory/graph": "workspace:*",
+        "@codememory/history": "workspace:*",
         "@codememory/indexer": "workspace:*",
         "@codememory/memory": "workspace:*",
         "@codememory/search": "workspace:*",
@@ -56,11 +57,11 @@
     },
     "packages/core": {
       "name": "@codememory/core",
-      "version": "0.1.0-alpha.23",
+      "version": "0.1.0-alpha.28",
     },
     "packages/database": {
       "name": "@codememory/database",
-      "version": "0.1.0-alpha.23",
+      "version": "0.1.0-alpha.28",
       "dependencies": {
         "@codememory/core": "workspace:*",
         "@codememory/shared": "workspace:*",
@@ -69,14 +70,27 @@
     },
     "packages/graph": {
       "name": "@codememory/graph",
-      "version": "0.1.0-alpha.23",
+      "version": "0.1.0-alpha.28",
       "dependencies": {
         "@codememory/core": "workspace:*",
       },
     },
+    "packages/history": {
+      "name": "@codememory/history",
+      "version": "0.1.0-alpha.28",
+      "dependencies": {
+        "@codememory/core": "workspace:*",
+        "@codememory/indexer": "workspace:*",
+        "@codememory/memory": "workspace:*",
+        "@codememory/plugin-typescript": "workspace:*",
+        "@codememory/shared": "workspace:*",
+        "picomatch": "^4.0.7",
+        "zod": "^4.6.2",
+      },
+    },
     "packages/indexer": {
       "name": "@codememory/indexer",
-      "version": "0.1.0-alpha.23",
+      "version": "0.1.0-alpha.28",
       "dependencies": {
         "@codememory/core": "workspace:*",
         "@codememory/shared": "workspace:*",
@@ -87,10 +101,11 @@
     },
     "packages/mcp-server": {
       "name": "@codememory/mcp-server",
-      "version": "0.1.0-alpha.23",
+      "version": "0.1.0-alpha.28",
       "dependencies": {
         "@codememory/application": "workspace:*",
         "@codememory/core": "workspace:*",
+        "@codememory/history": "workspace:*",
         "@codememory/indexer": "workspace:*",
         "@codememory/memory": "workspace:*",
         "@codememory/shared": "workspace:*",
@@ -99,7 +114,7 @@
     },
     "packages/memory": {
       "name": "@codememory/memory",
-      "version": "0.1.0-alpha.23",
+      "version": "0.1.0-alpha.28",
       "dependencies": {
         "@codememory/core": "workspace:*",
         "@codememory/shared": "workspace:*",
@@ -108,14 +123,14 @@
     },
     "packages/plugin-sdk": {
       "name": "@codememory/plugin-sdk",
-      "version": "0.1.0-alpha.23",
+      "version": "0.1.0-alpha.28",
       "dependencies": {
         "@codememory/core": "workspace:*",
       },
     },
     "packages/plugin-typescript": {
       "name": "@codememory/plugin-typescript",
-      "version": "0.1.0-alpha.23",
+      "version": "0.1.0-alpha.28",
       "dependencies": {
         "@codememory/core": "workspace:*",
         "@codememory/shared": "workspace:*",
@@ -126,14 +141,14 @@
     },
     "packages/search": {
       "name": "@codememory/search",
-      "version": "0.1.0-alpha.23",
+      "version": "0.1.0-alpha.28",
       "dependencies": {
         "@codememory/core": "workspace:*",
       },
     },
     "packages/shared": {
       "name": "@codememory/shared",
-      "version": "0.1.0-alpha.23",
+      "version": "0.1.0-alpha.28",
       "dependencies": {
         "@codememory/core": "workspace:*",
         "zod": "^4.6.2",
@@ -141,7 +156,7 @@
     },
     "packages/test-utils": {
       "name": "@codememory/test-utils",
-      "version": "0.1.0-alpha.23",
+      "version": "0.1.0-alpha.28",
       "dependencies": {
         "@codememory/database": "workspace:*",
         "pg": "^8.23.0",
@@ -176,6 +191,8 @@
     "@codememory/database": ["@codememory/database@workspace:packages/database"],
 
     "@codememory/graph": ["@codememory/graph@workspace:packages/graph"],
+
+    "@codememory/history": ["@codememory/history@workspace:packages/history"],
 
     "@codememory/indexer": ["@codememory/indexer@workspace:packages/indexer"],
 

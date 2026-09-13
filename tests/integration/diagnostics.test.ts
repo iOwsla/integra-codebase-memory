@@ -4,6 +4,7 @@ import { TypeScriptPlugin } from "@codememory/plugin-typescript";
 import { createProjectContext } from "@codememory/shared";
 import { fixture, testDatabase } from "@codememory/test-utils";
 import { expect, it } from "vitest";
+import { version } from "../../package.json";
 
 it("reports syntax locations, bounded diagnostics and distinct exclusions while retaining valid queries", async () => {
   const db = await testDatabase();
@@ -169,7 +170,7 @@ it("distinguishes preview truncation from index completeness and provides accura
     });
     const status = await service.status();
     expect(status).toMatchObject({
-      runtime: { version: "0.1.0-alpha.28", pid: process.pid, sessionId: c.sessionId },
+      runtime: { version, pid: process.pid, sessionId: c.sessionId },
       lastIndexJob: { owner: { pid: process.pid, sessionId: c.sessionId }, lockActive: false },
       analysisScope: { languages: ["JavaScript", "TypeScript", "Prisma"] },
     });

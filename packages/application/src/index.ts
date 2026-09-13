@@ -1,5 +1,6 @@
 import { relative } from "node:path";
 import type { ProjectContext, ProjectStore } from "@codememory/core";
+import { HistoryService, historyReadSchemas } from "@codememory/history";
 import type { ProjectSession } from "@codememory/indexer";
 import {
   MemoryService,
@@ -65,9 +66,11 @@ export const schemas = {
     .strict(),
   search_memory: memorySearchSchema,
   ...workflowReadSchemas,
+  ...historyReadSchemas,
 };
 /** Shared application facade. Adapter schemas cannot supply repository IDs. */
 export class CodebaseService {
+  readonly history: HistoryService;
   readonly memory: MemoryService;
   readonly memoryWorkflow: MemoryWorkflowService;
   constructor(
@@ -75,6 +78,7 @@ export class CodebaseService {
     private readonly store: ProjectStore,
     private readonly session?: ProjectSession,
   ) {
+    this.history = new HistoryService(context, store);
     this.memory = new MemoryService(context, store);
     this.memoryWorkflow = new MemoryWorkflowService(context, store);
   }
@@ -121,8 +125,42 @@ export class CodebaseService {
     if (name === "codebase_status") {
       return this.status(input);
     }
+    if (name === "get_history_job") return this.history.jobDetails(input);
+    if (name === "history_status") return this.history.status();
+    if (name === "search_history") return this.history.search(input);
+    if (name === "get_history_evidence") return this.history.evidence(input);
+    if (name === "engineering_context") {
+      const p = historyReadSchemas.engineering_context.parse(input);
+      const applicableRules = await this.memoryWorkflow.recall({ task: p.task, paths: p.paths });
+      const ids = (applicableRules.results as { id: string }[]).map((r) => r.id);
+      const currentCodeLinks = [];
+      for (const path of p.paths) {
+        try {
+          currentCodeLinks.push({
+            path,
+            ...(await this.execute("get_file_outline", { path, limit: 10 })),
+          });
+        } catch {
+          currentCodeLinks.push({ path, coverage: "SOURCE_OR_INDEX_UNAVAILABLE" });
+        }
+      }
+      return {
+        ...(await this.history.contextFor(input)),
+        applicableRules,
+        currentCodeLinks,
+        ruleEvidence: await this.history.linkedMemoryEvidence(ids),
+      };
+    }
     if (name === "get_memory_checkpoints") return this.memoryWorkflow.checkpoints.list(input);
-    if (name === "recall_context") return this.memoryWorkflow.recall(input);
+    if (name === "recall_context") {
+      const result = await this.memoryWorkflow.recall(input);
+      return {
+        ...result,
+        historyEvidence: await this.history.linkedMemoryEvidence(
+          (result.results as { id: string }[]).map((r) => r.id),
+        ),
+      };
+    }
     if (name === "memory_workflow_status") return this.memoryWorkflow.status();
     if (name === "list_memory_candidates") return this.memoryWorkflow.list(input);
     if (name === "search_memory") {

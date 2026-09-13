@@ -14,6 +14,7 @@ import type {
 import { CodeMemoryError } from "@codememory/core";
 import { log, projectName, runtimeInfo } from "@codememory/shared";
 import pg from "pg";
+import { PostgresHistory } from "./history";
 import { MemoryWorkflowRepository } from "./memory-workflow";
 import { PostgresIndexReader } from "./reader";
 import { migrations } from "./schema";
@@ -36,10 +37,16 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
     );
     if (!pool) this.pool.on("error", () => log("error", "database_idle_connection_lost"));
   }
+  history(context: ProjectContext) {
+    return new PostgresHistory(this.pool, context.projectScopeId);
+  }
   private query(text: string, values: unknown[] = []) {
     return (this.connection ?? this.pool).query(text, values);
   }
-  async migrate() {
+  // `through` lets tests rebuild an older installation's schema before upgrading it.
+  async migrate(through = migrations.length) {
+    if (!Number.isInteger(through) || through < 1 || through > migrations.length)
+      throw new CodeMemoryError("INVALID_ARGUMENT", "Unknown migration version");
     const c = await this.pool.connect();
     try {
       await c.query("BEGIN");
@@ -47,7 +54,7 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
       await c.query(
         "CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
       );
-      for (const [index, sql] of migrations.entries()) {
+      for (const [index, sql] of migrations.slice(0, through).entries()) {
         const version = index + 1;
         const r = await c.query("SELECT version FROM schema_migrations WHERE version=$1", [
           version,

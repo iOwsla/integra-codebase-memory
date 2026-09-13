@@ -1,3 +1,8 @@
+import type { HistoryStore } from "./history";
+
+export type * from "./history";
+export { defaultHistorySettings } from "./history";
+
 import type { MemoryWorkflowStore } from "./memory-workflow";
 
 export type {
@@ -227,6 +232,7 @@ export interface IndexReader {
   ): Promise<Record<string, unknown>>;
 }
 export interface ProjectStore extends MemoryWorkflowStore {
+  history?(context: ProjectContext): HistoryStore;
   recordIndexProgress(context: ProjectContext, progress: IndexProgress): Promise<void>;
   register(context: ProjectContext): Promise<void>;
   snapshot(context: ProjectContext): Promise<Snapshot>;

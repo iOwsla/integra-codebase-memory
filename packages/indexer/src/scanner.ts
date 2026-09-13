@@ -13,7 +13,14 @@ import picomatch from "picomatch";
 export type ScanObserver = (event: "scan" | "hash" | "read", path: string) => void;
 export class RepositoryScanner implements FileScanner {
   constructor(private readonly observe: ScanObserver = () => {}) {}
-  async scan(context: ProjectContext, references?: ConfigurationReferences) {
+  async discover(context: ProjectContext, visit: (path: string) => Promise<void>) {
+    return this.scan(context, undefined, visit);
+  }
+  async scan(
+    context: ProjectContext,
+    references?: ConfigurationReferences,
+    visit?: (path: string) => Promise<void>,
+  ) {
     const jsonCandidates = new Map<string, string>();
     const files: IndexedFile[] = [];
     const configs = new Map<string, string>();
@@ -57,7 +64,9 @@ export class RepositoryScanner implements FileScanner {
           if ((e as { code?: string }).code !== "NOT_FOUND") throw e;
         }
       }
-      for (const entry of await readdir(dir, { withFileTypes: true })) {
+      for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a, b) =>
+        a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+      )) {
         const path = resolve(dir, entry.name),
           rel = slash(relative(context.canonicalRoot, path));
         const exclusionReason = forbidden(rel)
@@ -90,6 +99,11 @@ export class RepositoryScanner implements FileScanner {
           continue;
         }
         if (!entry.isFile()) continue;
+        if (visit) {
+          if (matchesInclude(rel)) await visit(rel);
+          else exclude("files", "NOT_INCLUDED");
+          continue;
+        }
         if (entry.name.endsWith(".json")) jsonCandidates.set(path, rel);
         const config = /^(tsconfig.*\.json|jsconfig.*\.json|package\.json)$/.test(entry.name);
         const source = /\.(?:[cm]?[jt]sx?|prisma)$/.test(entry.name);
