@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.28 — 2026-09-13
+
+- Define semantic memory capture triggers and pending-review guidance in both client instructions and MCP status/tool descriptions.
+
+- Memory protocol 2 extracts evidence segment IDs and resolves original quotes on the server, preventing model translation or spelling changes from corrupting quotes. Unknown and duplicate selections remain rejected.
+- Reuse source fingerprints only within one checkpoint/recall request to avoid repeated reads of shared files without cross-request stale caching.
+- Add Turkish/Unicode evidence regressions, a live Turkish provider probe and a reproducible checkpoint I/O benchmark.
+
 ## 0.1.0-alpha.27 — 2026-09-12
 
 - Correct the root package version omitted from the alpha.26 commit. Includes the Claude Draft 7 compatibility fix and decision-to-code checkpoints; alpha.26 publication was blocked by CI.

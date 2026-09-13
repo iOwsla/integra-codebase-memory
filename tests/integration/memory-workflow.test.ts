@@ -16,7 +16,7 @@ const candidate = {
   id: "c1",
   claim: "Validate refund quantities before saving.",
   classification: "REQUIREMENT",
-  evidence: [{ messageId: "m1", quote: "Always validate refund quantities before saving." }],
+  evidenceIds: ["m0s0"],
 };
 const review = {
   candidateId: "c1",
@@ -141,7 +141,7 @@ it.each([
     await t.workflow.configure(true);
     const bad = {
       ...candidate,
-      ...(kind === "invalid quote" ? { evidence: [{ messageId: "m1", quote: "invented" }] } : {}),
+      ...(kind === "invalid quote" ? { evidenceIds: ["unknown"] } : {}),
       ...(kind === "wrong classification" ? { classification: "EXPERIMENT_AUTHORIZATION" } : {}),
     };
     vi.mocked(t.p.extract).mockResolvedValue({ output: { candidates: [bad] }, metrics: {} });

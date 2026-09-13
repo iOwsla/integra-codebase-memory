@@ -1,13 +1,13 @@
 import { relative, resolve } from "node:path";
 import {
   CodeMemoryError,
-  type MemoryBatch,
   type MemoryCandidate,
   type ProjectContext,
   type ProjectStore,
 } from "@codememory/core";
 import { contains, forbidden, slash } from "@codememory/shared";
 import { checkpointBudget, MemoryCheckpointService } from "./checkpoints";
+import { evidenceSegments, resolveEvidence } from "./evidence";
 import {
   batchSchema,
   extractionSchema,
@@ -36,6 +36,30 @@ export class MemoryWorkflowService {
       enabled: await this.store.memoryWorkflowEnabled(this.context),
       protocolVersion: MEMORY_PROTOCOL_VERSION,
       mode: "REVIEW_REQUIRED",
+      capturePolicy: {
+        triggers: [
+          "DURABLE_BUSINESS_RULE",
+          "ACCEPTED_ARCHITECTURE",
+          "PROJECT_CONVENTION",
+          "USER_CORRECTION",
+          "EXPLICIT_MEMORY_REQUEST",
+        ],
+        timing:
+          "After a durable decision or correction, at the next natural task boundary; assess before the final response",
+        skip: [
+          "ROUTINE_COMMAND",
+          "QUESTION",
+          "BRAINSTORM",
+          "EXPERIMENT_AUTHORIZATION",
+          "UNCHANGED_EXISTING_RULE",
+          "ASSISTANT_COMPLETION_CLAIM",
+          "SECRET_OR_ACCOUNT_DATA",
+        ],
+        submission:
+          "Only when enabled; use exact original messages and enough context to disambiguate acceptance. Queueing is not saving.",
+        review:
+          "Inspect a known pending job once at task start; present READY candidates for explicit approval. No busy polling.",
+      },
       transport: "EXPLICIT_MCP_BATCH",
       worker: "MCP_CONNECTION_OR_CLI",
       models: { extractor: "gpt-5.3-codex-spark", verifier: "claude-haiku-4-5-20251001" },
@@ -166,6 +190,7 @@ export class MemoryWorkflowService {
       const jobSignal = signal ? AbortSignal.any([signal, leaseSignal]) : leaseSignal;
       if (jobSignal.aborted) throw new CodeMemoryError("MEMORY_CANCELLED", "Worker stopped");
       const metrics: Record<string, unknown> = { protocolVersion: MEMORY_PROTOCOL_VERSION };
+      const segments = evidenceSegments(job.input);
       let feedback: unknown;
       let final: MemoryCandidate[] = [];
       for (let pass = 0; pass < 2; pass++) {
@@ -173,7 +198,7 @@ export class MemoryWorkflowService {
         const extracted = await this.provider.extract(
           {
             project: "selected project",
-            messages: job.input.messages,
+            evidenceSegments: segments,
             ...(feedback ? { correction: feedback } : {}),
           },
           jobSignal,
@@ -183,12 +208,12 @@ export class MemoryWorkflowService {
         if (!extraction.success)
           throw new CodeMemoryError(
             "MEMORY_EXTRACTION_SCHEMA",
-            "Extractor output does not match protocol 1",
+            `Extractor output does not match protocol ${MEMORY_PROTOCOL_VERSION}`,
           );
-        const candidates = extraction.data.candidates;
+        const candidates = resolveEvidence(extraction.data.candidates, segments);
         if (new Set(candidates.map((c) => c.id)).size !== candidates.length)
           throw new CodeMemoryError("INVALID_EVIDENCE", "Duplicate candidate IDs");
-        this.validateEvidence(job.input, candidates);
+
         if (!candidates.length) return { candidates: [], metrics };
         if (!(await this.store.memoryWorkflowEnabled(this.context)))
           throw new CodeMemoryError("MEMORY_DISABLED", "Project disabled before verification");
@@ -202,7 +227,7 @@ export class MemoryWorkflowService {
         if (!verification.success)
           throw new CodeMemoryError(
             "MEMORY_VERIFICATION_SCHEMA",
-            "Verifier output does not match protocol 1",
+            `Verifier output does not match protocol ${MEMORY_PROTOCOL_VERSION}`,
           );
         const reviews = verification.data.reviews;
         if (
@@ -249,19 +274,5 @@ export class MemoryWorkflowService {
       }
       return { candidates: final, metrics };
     });
-  }
-  private validateEvidence(
-    batch: MemoryBatch,
-    candidates: { evidence: { messageId: string; quote: string }[] }[],
-  ) {
-    for (const candidate of candidates)
-      for (const evidence of candidate.evidence) {
-        const message = batch.messages.find((m) => m.id === evidence.messageId);
-        if (!message?.text.includes(evidence.quote))
-          throw new CodeMemoryError(
-            "INVALID_EVIDENCE",
-            "Candidate quote does not match its cited message",
-          );
-      }
   }
 }

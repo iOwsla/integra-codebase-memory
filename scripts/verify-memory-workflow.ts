@@ -51,7 +51,7 @@ try {
       {
         id: "m1",
         role: "user",
-        text: "Project requirement: always validate that refund quantities are positive before saving a refund.",
+        text: "Proje kuralı: iadeyi kaydetmeden önce iade miktarının pozitif olduğunu her zaman kontrol et.",
       },
       { id: "m2", role: "user", text: "My subscription already has a 20x usage allowance." },
     ],

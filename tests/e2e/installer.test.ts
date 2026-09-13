@@ -331,7 +331,7 @@ it("upgrades recognizable connections with backups while preserving unrelated se
     expect(updatedRules).not.toContain("@AGENTS.md");
     expect(updatedRules).toContain("attach_project");
     expect(updatedRules).toContain("diagnosticLimit");
-    expect(updatedRules).toContain("Project memory lifecycle (protocol 1)");
+    expect(updatedRules).toContain("Project memory lifecycle (protocol 2)");
     expect(updatedRules).toContain("submit_memory_batch");
     expect(JSON.parse((await apply("--upgrade", "--write")).stdout).changedFiles).toEqual([]);
     now.mcpServers.integra_code_memory.args[3] = resolve(f.root, "different-project");

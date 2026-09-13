@@ -164,3 +164,34 @@ it("rejects cross-project writes, protected paths, symlink escapes and unsupport
     await other.dispose();
   }
 });
+
+it("reads a shared source once per request but detects changes in the next request", async () => {
+  const { MemoryCheckpointService, checkpointBudget } = await import(
+    "../../packages/memory/src/checkpoints"
+  );
+  const db = await testDatabase();
+  const f = await fixture({ "a.ts": "const a = 1;" });
+  try {
+    const c = await createProjectContext(f.root);
+    await db.store.register(c);
+    const app = new CodebaseService(c, db.store);
+    const m = await app.memory.remember({ type: "DECISION", title: "Shared", content: "Reuse" });
+    const service = new MemoryCheckpointService(c, db.store);
+    const captured = await service.capture({
+      memoryId: m.id,
+      implementation: "REPORTED_IMPLEMENTED",
+      note: "Synthetic",
+      links: [{ path: "a.ts", role: "IMPLEMENTATION" }],
+    });
+    const budget = checkpointBudget();
+    await service.inspect(captured.checkpoint, budget);
+    const remaining = budget.bytes;
+    await service.inspect(captured.checkpoint, budget);
+    expect(budget.bytes).toBe(remaining);
+    await writeFile(resolve(f.root, "a.ts"), "const a = 2;");
+    expect((await service.inspect(captured.checkpoint)).sourceState).toBe("RECHECK_REQUIRED");
+  } finally {
+    await db.dispose();
+    await f.dispose();
+  }
+});

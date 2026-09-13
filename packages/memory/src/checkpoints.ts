@@ -59,19 +59,28 @@ export const checkpointReadSchema = z
   .strict();
 
 /** Shared per-request I/O budget, including recall of multiple memories. */
-export const checkpointBudget = () => ({ bytes: 8 * 1024 * 1024 });
+export interface CheckpointBudget {
+  bytes: number;
+  fingerprints?: Map<string, { path: string; contentHash: string }>;
+}
+export const checkpointBudget = (): CheckpointBudget => ({
+  bytes: 8 * 1024 * 1024,
+  fingerprints: new Map(),
+});
 export class MemoryCheckpointService {
   constructor(
     private readonly context: ProjectContext,
     private readonly store: ProjectStore,
   ) {}
-  private async fingerprint(path: string, budget: { bytes: number }) {
+  private async fingerprint(path: string, budget: CheckpointBudget) {
     if (isAbsolute(path) || /^[A-Za-z]:|\\/.test(path))
       throw new CodeMemoryError(
         "PATH_OUT_OF_SCOPE",
         "Use a project-relative path with forward slashes",
       );
     const actual = await safePath(this.context, path);
+    const cached = budget.fingerprints?.get(actual);
+    if (cached) return cached;
     const handle = await open(actual, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       const info = await handle.stat();
@@ -97,10 +106,13 @@ export class MemoryCheckpointService {
           "SOURCE_CHANGED",
           "Source changed during checkpoint observation; retry",
         );
-      return {
+      const result = {
         path: slash(relative(this.context.canonicalRoot, actual)),
         contentHash: hash(buffer.subarray(0, length)),
       };
+      budget.fingerprints ??= new Map();
+      budget.fingerprints.set(actual, result);
+      return result;
     } finally {
       await handle.close();
     }

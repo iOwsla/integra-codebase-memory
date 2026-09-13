@@ -222,3 +222,46 @@ exit status. Unknown nonzero exits remain MEMORY_PROVIDER_EXIT without assuming
 an authentication or quota cause. Diagnostics expose fixed classified messages,
 not raw stderr, because CLI output can echo credentials and conversation content.
 This compatibility fix does not resolve INVALID_EVIDENCE quote mismatches.
+
+
+## Evidence selection protocol 2 (alpha.28)
+
+The public submit_memory_batch input is unchanged. For each job attempt, the
+server splits exact message text into deterministic segments of up to 800 Unicode
+code points, retaining role and message identity. Spark returns evidenceIds only.
+The host resolves each ID to the original quote, and Haiku still checks semantic
+support against original messages. No normalization, spelling repair or translation
+is applied to evidence. Unknown/repeated IDs fail closed with candidate/selection
+positions, without echoing private text in errors.
+
+Historical jobs and stored quotes are retained. Retrying an old failed job uses
+the current extractor protocol and its original input; clients must reconnect to
+the updated runtime. Protocol 2 prevents model-authored quote mismatches, not all
+INVALID_EVIDENCE failures or semantic mistakes. Long claims spanning segment
+boundaries may require multiple evidence IDs (maximum three per candidate).
+
+Checkpoint hashing now shares a bounded fingerprint map inside one request only.
+The next request reopens and rehashes source. This reduces repeated reads when
+memories share files; it does not claim a transactional multi-file snapshot.
+Run `bun scripts/benchmark-memory-checkpoints.ts` for a disposable synthetic
+comparison. It does not measure PostgreSQL/Docker peak RAM or real-repo indexing.
+
+
+## Agent capture triggers (alpha.28)
+
+Both client instruction templates and MCP workflow descriptions now define
+semantic capture triggers: durable business rules, accepted architecture/reuse,
+project conventions, corrections and explicit memory requests. Assess at natural
+task boundaries and before the final response, not only when the user says
+"remember". Workflow enablement permits candidate submission, not promotion.
+
+The status response exposes capturePolicy so an agent can recover these rules
+without reading repository instructions. Known pending jobs should be inspected
+once on task resumption; READY still requires explicit user approval. Unchanged
+existing rules, routine commands, questions, experiments and assistant completion
+claims must not generate new permanent rules.
+
+These are agent instructions, not a transcript hook. MCP cannot observe messages
+that the client does not submit, nor guarantee that every client follows these
+instructions. No autonomous conversation monitoring or automatic promotion is
+introduced by this change.
