@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.30 — 2026-09-14
+
+- Add DeepSeek and explicit OpenAI-compatible API profiles, project/workflow routing, native OS credential storage and a synthetic connection test.
+- Preserve evidence validation and human approval across HTTP history and conversation workflows. Add persistent estimated usage allowances, request caps and safe diagnostics without provider fallback.
+- Reduce default CLI help to everyday commands; retain all advanced commands and options through --help-all.
+- Remove an unused legacy diff helper and enforce unused local/parameter checks in TypeScript.
+
+
 ## 0.1.0-alpha.29 — 2026-09-14
 
 - Add opt-in Markdown and active-branch Git history collection with bounded, resumable jobs, exact source evidence and staged/unstaged observations.

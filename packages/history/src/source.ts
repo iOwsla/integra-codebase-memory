@@ -80,21 +80,3 @@ export function sourceLocators(path: string, bytes: Buffer) {
         : "SYNTACTIC_ONLY",
   };
 }
-export function changedRange(before: string, after: string) {
-  const a = before.split("\n"),
-    b = after.split("\n");
-  let start = 0,
-    endA = a.length,
-    endB = b.length;
-  while (start < endA && start < endB && a[start] === b[start]) start++;
-  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
-    endA--;
-    endB--;
-  }
-  return {
-    before: { startLine: start + 1, endLine: endA },
-    after: { startLine: start + 1, endLine: endB },
-    algorithm: "COMMON_PREFIX_SUFFIX",
-    includesUnchangedInterior: true,
-  };
-}

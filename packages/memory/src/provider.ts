@@ -13,6 +13,7 @@ import {
 } from "./protocol";
 
 export interface MemoryModelProvider {
+  describe?(): Promise<Record<string, unknown>>;
   extract(
     input: unknown,
     signal?: AbortSignal,

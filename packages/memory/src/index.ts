@@ -115,7 +115,9 @@ export class MemoryService {
   }
 }
 
+export { ConfiguredMemoryProvider, HttpMemoryProvider } from "./http-provider";
 export { workflowReadSchemas, workflowWriteSchemas } from "./protocol";
 export type { MemoryModelProvider } from "./provider";
 export { CliMemoryProvider } from "./provider";
+export { apiProfileSchema, credential, ProviderSettings, profileName } from "./provider-settings";
 export { MemoryWorkflowService } from "./workflow";

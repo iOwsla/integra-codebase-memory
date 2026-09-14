@@ -12,7 +12,7 @@ import {
   type ProjectStore,
 } from "@codememory/core";
 import { RepositoryScanner, watchPolicy } from "@codememory/indexer";
-import { CliMemoryProvider, type MemoryModelProvider } from "@codememory/memory";
+import { ConfiguredMemoryProvider, type MemoryModelProvider } from "@codememory/memory";
 import {
   contains,
   forbidden,
@@ -85,8 +85,9 @@ export class HistoryService {
   constructor(
     readonly context: ProjectContext,
     private readonly projectStore: ProjectStore,
-    private readonly provider: MemoryModelProvider = new CliMemoryProvider(
-      undefined,
+    private readonly provider: MemoryModelProvider = new ConfiguredMemoryProvider(
+      context.projectScopeId,
+      "history",
       historyPrompts,
     ),
   ) {}
@@ -149,6 +150,7 @@ export class HistoryService {
       projectScopeId: this.context.projectScopeId,
       settings,
       ...(await this.db.stats()),
+      provider: await this.provider.describe?.(),
       worktreeId,
       head: git.head,
       branch: git.branch,

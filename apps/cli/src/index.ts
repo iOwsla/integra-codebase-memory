@@ -21,15 +21,18 @@ import { assertProjectEnabled, listRegistrations } from "../../../scripts/setup/
 import { managementError, registerManagementCommands } from "../../../scripts/setup/management";
 import { CliProgress } from "../../../scripts/setup/progress";
 import { databaseUrl, readService } from "../../../scripts/setup/service-state";
+import { configureCliHelp } from "./help";
 import { registerHistoryCommands } from "./history";
 import { registerMemoryCommands } from "./memory";
+import { registerProviderCommands } from "./providers";
 
 const cli = new Command()
   .name("codememory")
   .description("Local, explicitly project-scoped code intelligence")
-  .version("0.1.0-alpha.29")
+  .version("0.1.0-alpha.30")
   .enablePositionalOptions();
 registerManagementCommands(cli);
+registerProviderCommands(cli);
 cli
   .command("updates")
   .description("Check public releases; never installs automatically")
@@ -430,6 +433,7 @@ scoped("watch [path]", "Watch selected project until SIGINT or SIGTERM").action(
     process.once("SIGTERM", () => void close());
   },
 );
+configureCliHelp(cli);
 cli.parseAsync().catch((error) => {
   process.stderr.write(
     `${JSON.stringify(publicError(["system", "projects", "updates", "update"].includes(process.argv[2] ?? "") ? managementError(error) : error))}\n`,

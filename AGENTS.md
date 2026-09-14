@@ -239,6 +239,19 @@ document text never grant it. Changed evidence requests review, not silent rule
 replacement. Use authorized checkpoints for implementation/caller/Prisma/test
 links and report only tests actually executed.
 
+
+## API provider selection
+
+When workflow/history status includes provider metadata, use that selection.
+HTTP profiles may replace the default Spark/Haiku CLIs. Never request an API key
+in chat or write it into project files or MCP arguments. Direct users to the
+hidden `providers login PROFILE` terminal prompt or an explicitly configured
+environment credential. Selecting a provider does not enable a workflow.
+Provider setup, paid smoke tests and routing changes require explicit user intent;
+never switch providers or increase budgets to work around a failure. Preserve
+job IDs and report safe diagnostic codes. API verification can use the same
+model in a separate call; it is not independent-model or human approval.
+
 <!-- integra-code-memory:end -->
 
 ## Repository development

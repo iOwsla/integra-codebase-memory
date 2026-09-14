@@ -34,7 +34,7 @@ export function registerHistoryCommands(
     .option("--no-git", "Disable Git history collection")
     .option("--wip", "Collect staged, unstaged and eligible untracked files")
     .option("--no-wip", "Disable WIP collection")
-    .option("--providers", "Allow selected source evidence to Spark/Haiku")
+    .option("--providers", "Allow selected source evidence to the configured provider")
     .option("--no-providers", "Disable further model processing")
     .option("--automatic", "Collect while an MCP connection is open")
     .option("--no-automatic", "Disable automatic collection")

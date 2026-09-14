@@ -42,7 +42,7 @@ jobs:
           bun-version: 1.3.3
       - run: bun install --frozen-lockfile
       - run: bunx vitest run tests/unit/prisma.test.ts tests/unit/prisma-comments.test.ts
-      - run: bunx vitest run tests/unit/history.test.ts
+      - run: bunx vitest run tests/unit/history.test.ts tests/unit/http-provider.test.ts tests/e2e/providers.test.ts tests/e2e/help.test.ts
       - run: bunx vitest run tests/unit/scope.test.ts -t "workflow scratch|root codememoryignore"
       - run: bunx vitest run tests/unit/memory-provider.test.ts
       - run: bun scripts/verify-upgrade.ts
@@ -69,6 +69,6 @@ jobs:
           bun-version: 1.3.3
       - run: bun install --frozen-lockfile
       - run: sh -n scripts/setup/ensure-docker.sh
-      - run: bunx vitest run tests/unit/history.test.ts
+      - run: bunx vitest run tests/unit/history.test.ts tests/unit/http-provider.test.ts tests/e2e/providers.test.ts tests/e2e/help.test.ts
       - run: bunx vitest run tests/unit/memory-provider.test.ts
       - run: bunx vitest run tests/unit/services.test.ts tests/e2e/installer.test.ts tests/e2e/bootstrap.test.ts tests/e2e/update.test.ts tests/unit/prisma.test.ts tests/unit/prisma-comments.test.ts

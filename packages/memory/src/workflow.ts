@@ -8,6 +8,7 @@ import {
 import { contains, forbidden, slash } from "@codememory/shared";
 import { checkpointBudget, MemoryCheckpointService } from "./checkpoints";
 import { evidenceSegments, resolveEvidence } from "./evidence";
+import { ConfiguredMemoryProvider } from "./http-provider";
 import {
   batchSchema,
   extractionSchema,
@@ -16,14 +17,17 @@ import {
   workflowReadSchemas,
   workflowWriteSchemas,
 } from "./protocol";
-import { CliMemoryProvider, type MemoryModelProvider } from "./provider";
+import type { MemoryModelProvider } from "./provider";
 
 export class MemoryWorkflowService {
   readonly checkpoints: MemoryCheckpointService;
   constructor(
     private readonly context: ProjectContext,
     private readonly store: ProjectStore,
-    private readonly provider: MemoryModelProvider = new CliMemoryProvider(),
+    private readonly provider: MemoryModelProvider = new ConfiguredMemoryProvider(
+      context.projectScopeId,
+      "memory",
+    ),
   ) {
     this.checkpoints = new MemoryCheckpointService(context, store);
   }
@@ -32,10 +36,12 @@ export class MemoryWorkflowService {
     return this.status();
   }
   async status() {
+    const provider = await this.provider.describe?.();
     return {
       enabled: await this.store.memoryWorkflowEnabled(this.context),
       protocolVersion: MEMORY_PROTOCOL_VERSION,
       mode: "REVIEW_REQUIRED",
+      provider,
       capturePolicy: {
         triggers: [
           "DURABLE_BUSINESS_RULE",
@@ -62,7 +68,10 @@ export class MemoryWorkflowService {
       },
       transport: "EXPLICIT_MCP_BATCH",
       worker: "MCP_CONNECTION_OR_CLI",
-      models: { extractor: "gpt-5.3-codex-spark", verifier: "claude-haiku-4-5-20251001" },
+      models:
+        provider?.transport === "HTTP"
+          ? { extractor: provider.model, verifier: provider.model }
+          : { extractor: "gpt-5.3-codex-spark", verifier: "claude-haiku-4-5-20251001" },
       limits: { messages: 20, inputBytes: 16000, candidates: 5, attempts: 3 },
       projectScopeId: this.context.projectScopeId,
     };

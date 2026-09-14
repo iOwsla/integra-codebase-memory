@@ -147,3 +147,6 @@ isolation, CLI cwd defaults and corrupted-backup rollback. Consult the verificat
 report for actual command results. These checks do not certify all dynamic
 relationships, arbitrary Markdown semantics, provider quotas or Windows and
 large-repository performance.
+
+Starting with alpha.30, [API provider profiles](api-providers.md) can replace the
+default CLI models while retaining history permissions and review.

@@ -28,9 +28,9 @@ export function registerMemoryCommands(
   };
   command(
     "configure",
-    "Enable or disable sending selected excerpts to locally authenticated model CLIs",
+    "Enable or disable sending selected excerpts to the configured model provider",
   )
-    .option("--enable", "Enable Spark extraction and Haiku verification")
+    .option("--enable", "Enable extraction and verification with the selected provider")
     .option("--disable", "Stop further submissions and processing")
     .option("--yes", "Authorize processing selected excerpts with model providers")
     .action(async (o) => {
@@ -42,7 +42,7 @@ export function registerMemoryCommands(
       if (o.enable && !o.yes)
         throw new CodeMemoryError(
           "CONFIRMATION_REQUIRED",
-          "--enable --yes authorizes sending selected project excerpts to Spark and Haiku; active memories still require review",
+          "--enable --yes authorizes sending selected project excerpts to the selected provider; active memories still require review",
         );
       await run(o.project, async (app) => {
         await app.store.migrate();
