@@ -135,8 +135,19 @@ get at most one extraction correction followed by another verification. Other
 rejections remain review data. A repeated approval returns the same memory; exact
 active duplicates reuse a record. Semantic merging is never automatic.
 
-Recall uses repository rules and matching directory ancestors, files and symbols,
-ordered by scope specificity, task text relevance, priority and recency. It returns
+Recall preserves direct repository rules and matching directory ancestors, files and
+symbols. Document-derived repository rules require a task-text, evidence-path or
+latest-checkpoint match when context is supplied. With no context, recall remains a
+bounded overview. `search_memory` still browses all approved rules.
+
+Ranking prefers latest checkpoint paths, document evidence paths, scope specificity,
+task lexeme relevance, priority and recency. Path associations accept exact paths or
+directory descendants with component boundaries. Document paths are retrieval hints,
+not a declaration that a rule applies only to its source document. Approved scope and
+content are never rewritten. Text relevance uses English stemming and any matching
+task lexeme; it is not semantic or cross-language search. Changed or missing source
+evidence does not revoke a rule; callers must inspect returned evidence freshness.
+It returns
 at most ten records with a 6000-character combined content budget. It discloses
 truncation and does not assert that stored code-dependent claims are current.
 The first workflow version promotes repository-scoped rules; explicit `remember`
@@ -197,7 +208,7 @@ Each checkpoint contains at most 10 links. Reads are limited to 2 MiB per file a
 8 MiB per request. Read failures or exhausted budgets return UNKNOWN with a
 reason, never UNCHANGED. No source text is copied into checkpoint storage.
 
-`recall_context` prioritizes latest-checkpoint exact path matches among eligible
+`recall_context` prioritizes latest-checkpoint exact or directory-descendant path matches among eligible
 memories and includes the latest checkpoint for each returned memory, checks
 its linked files, and returns at most two links per memory. Follow
 `get_memory_checkpoints` when `linksTruncated` is true. CHANGED, MISSING or UNKNOWN

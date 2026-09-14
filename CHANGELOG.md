@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.31 — 2026-09-14
+
+- Filter document-derived memory recall by task lexemes, evidence paths and latest checkpoint paths instead of returning every repository rule.
+- Support directory-descendant matches with path component boundaries; preserve direct repository rules and approved scope/content.
+- Preserve legacy database compatibility and cover source changes, restart, archive and project isolation.
+
 ## 0.1.0-alpha.30 — 2026-09-14
 
 - Add DeepSeek and explicit OpenAI-compatible API profiles, project/workflow routing, native OS credential storage and a synthetic connection test.

@@ -358,35 +358,63 @@ export class MemoryWorkflowRepository {
     symbols: string[],
     limit: number,
   ) {
-    const sql = `WITH ranked AS (
-      SELECT data,id,CASE WHEN EXISTS (
-        SELECT 1 FROM jsonb_array_elements(COALESCE((
-          SELECT cp.data->'links' FROM memory_checkpoints cp
-          WHERE cp.repository_id=$1 AND cp.memory_id=memories.id
-          ORDER BY cp.created_at DESC,cp.id DESC LIMIT 1
-        ),'[]'::jsonb)) link WHERE link->>'path'=ANY($3::text[])
-      ) THEN 5 ELSE CASE data#>>'{scope,type}' WHEN 'symbol' THEN 4 WHEN 'file' THEN 3 WHEN 'directory' THEN 2 ELSE 1 END END AS scope_rank,
-      ts_rank(to_tsvector('simple',(data->>'title') || ' ' || (data->>'content')),plainto_tsquery('simple',$2)) AS relevance
-      FROM memories WHERE repository_id=$1 AND data->>'status'='ACTIVE' AND (
-        data#>>'{scope,type}'='repository' OR
+    // Legacy installations can recall without installing optional history tables.
+    const {
+      rows: [tables],
+    } = await this.pool.query(
+      "SELECT to_regclass('memory_checkpoints') IS NOT NULL AS checkpoints, to_regclass('history_memory_evidence') IS NOT NULL AS history",
+    );
+    const pathMatch = (value: string) =>
+      `EXISTS(SELECT 1 FROM unnest($3::text[]) p WHERE p='.' OR ${value}=p OR starts_with(${value},p||'/'))`;
+    const checkpointMatch = tables.checkpoints
+      ? `EXISTS (
+      SELECT 1 FROM jsonb_array_elements(COALESCE((
+        SELECT cp.data->'links' FROM memory_checkpoints cp
+        WHERE cp.repository_id=$1 AND cp.memory_id=memories.id
+        ORDER BY cp.created_at DESC,cp.id DESC LIMIT 1
+      ),'[]'::jsonb)) link WHERE ${pathMatch("link->>'path'")}
+    )`
+      : "false";
+    const evidenceMatch = tables.history
+      ? `EXISTS (
+      SELECT 1 FROM history_memory_evidence e
+      JOIN history_segments s ON s.repository_id=e.repository_id AND s.id=e.segment_id
+      JOIN history_revisions r ON r.repository_id=s.repository_id AND r.id=s.revision_id
+      WHERE e.repository_id=$1 AND e.memory_id=memories.id AND ${pathMatch("r.path")}
+    )`
+      : "false";
+    // OR lexemes let a task sentence match a relevant topic without requiring
+    // every word to appear. This is lexical retrieval, not semantic inference.
+    const sql = `WITH task AS (
+      SELECT COALESCE(to_tsquery('simple',(SELECT string_agg(quote_literal(term),' | ') FROM unnest(
+        tsvector_to_array(to_tsvector('english',$2))) term)),''::tsquery) AS terms
+    ), candidates AS (
+      SELECT data,id,${checkpointMatch} AS checkpoint_match,
+        ${evidenceMatch} AS evidence_match,
+        to_tsvector('english',coalesce(data->>'title','') || ' ' || coalesce(data->>'content','')) AS document,
+        CASE data#>>'{scope,type}' WHEN 'symbol' THEN 4 WHEN 'file' THEN 3 WHEN 'directory' THEN 2 ELSE 1 END AS scope_rank
+      FROM memories WHERE repository_id=$1 AND data->>'status'='ACTIVE'
+    ), ranked AS (
+      SELECT candidates.*,ts_rank(document,terms) AS relevance FROM candidates CROSS JOIN task
+      WHERE (
+        (data#>>'{scope,type}'='repository' AND (
+          NOT starts_with(coalesce(data->>'source',''),'history-job:') OR
+          (btrim($2)='' AND cardinality($3::text[])=0 AND cardinality($4::text[])=0) OR
+          document @@ terms OR checkpoint_match OR evidence_match
+        )) OR
         (data#>>'{scope,type}'='file' AND data#>>'{scope,target}'=ANY($3::text[])) OR
         (data#>>'{scope,type}'='symbol' AND data#>>'{scope,target}'=ANY($4::text[])) OR
         (data#>>'{scope,type}'='directory' AND EXISTS(SELECT 1 FROM unnest($3::text[]) p WHERE data#>>'{scope,target}'='.' OR p=data#>>'{scope,target}' OR starts_with(p,(data#>>'{scope,target}')||'/')))
-      )) SELECT data FROM ranked ORDER BY scope_rank DESC,relevance DESC,(data->>'priority')::int DESC,data->>'createdAt' DESC,id LIMIT $5`;
-    let rows: { data: MemoryEntry }[];
-    try {
-      rows = (await this.pool.query(sql, [c.projectScopeId, query, paths, symbols, limit + 1]))
-        .rows;
-    } catch (error) {
-      // Preserve recall for pre-checkpoint installations until migrations run.
-      if (!(error && typeof error === "object" && "code" in error && error.code === "42P01"))
-        throw error;
-      const legacy = sql
-        .replace(/CASE WHEN EXISTS \([\s\S]*?THEN 5 ELSE CASE/, "CASE")
-        .replace("ELSE 1 END END AS scope_rank", "ELSE 1 END AS scope_rank");
-      rows = (await this.pool.query(legacy, [c.projectScopeId, query, paths, symbols, limit + 1]))
-        .rows;
-    }
+      )
+    ) SELECT data FROM ranked ORDER BY checkpoint_match DESC,evidence_match DESC,
+      scope_rank DESC,relevance DESC,(data->>'priority')::int DESC,data->>'createdAt' DESC,id LIMIT $5`;
+    const { rows } = await this.pool.query<{ data: MemoryEntry }>(sql, [
+      c.projectScopeId,
+      query,
+      paths,
+      symbols,
+      limit + 1,
+    ]);
     return {
       results: rows.slice(0, limit).map((r) => r.data as MemoryEntry),
       hasMore: rows.length > limit,
