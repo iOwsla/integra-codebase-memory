@@ -394,3 +394,42 @@ it("resumes after cancellation, reports output/source limits, and refuses cross-
     await b.dispose();
   }
 }, 30000);
+
+it("skips protected Git history paths without aborting or storing their content", async () => {
+  const db = await testDatabase();
+  const f = await fixture({
+    ".env": "SYNTHETIC_EXCLUDED_VALUE=fixture-only",
+    "dist/old.js": "// SYNTHETIC_EXCLUDED_VALUE",
+    ".workflow-tmp/plan.md": "# SYNTHETIC_EXCLUDED_VALUE",
+    "src/valid.ts": "export const valid = 1;",
+  });
+  try {
+    await git(f.root, ["init"]);
+    await git(f.root, ["add", "-f", "."]);
+    await git(f.root, ["commit", "-m", "fx"]);
+    await git(f.root, ["mv", ".env", "previous-env.txt"]);
+    await git(f.root, ["commit", "-m", "fx"]);
+    const c = await createProjectContext(f.root);
+    await db.store.register(c);
+    const history = new HistoryService(c, db.store);
+    await history.configure({ git: true, apply: true });
+    const result = await collect(history, 1);
+    expect(result.state).toBe("SUCCEEDED");
+    const jobs = (await history.search({ kind: "jobs" })).results as HistoryData[];
+    expect(Number((jobs[0]!.data as HistoryData).excludedChanges)).toBeGreaterThanOrEqual(4);
+    const changes = (await history.search({ kind: "changes", limit: 20 })).results as HistoryData[];
+    expect(changes.some((v) => v.new_path === "src/valid.ts")).toBe(true);
+    expect(changes.some((v) => v.new_path === ".env" || v.old_path === ".env")).toBe(false);
+    const segments = await history.search({ kind: "segments", query: "SYNTHETIC_EXCLUDED_VALUE" });
+    expect(segments.results).toEqual([]);
+    await expect(history.search({ path: ".env" })).rejects.toMatchObject({
+      code: "PATH_OUT_OF_SCOPE",
+    });
+    await expect(history.search({ path: "../outside" })).rejects.toMatchObject({
+      code: "PATH_OUT_OF_SCOPE",
+    });
+  } finally {
+    await db.dispose();
+    await f.dispose();
+  }
+});

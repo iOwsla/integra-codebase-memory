@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.32 — 2026-09-19
+
+- Skip protected/out-of-scope Git collection candidates rather than aborting history scans with PATH_OUT_OF_SCOPE.
+- Preserve strict explicit query path validation and exclude renamed changes with protected old paths.
+- Add a real Git regression for protected files, bounded collection, excluded content and explicit path rejection.
+
 ## 0.1.0-alpha.31 — 2026-09-14
 
 - Filter document-derived memory recall by task lexemes, evidence paths and latest checkpoint paths instead of returning every repository rule.

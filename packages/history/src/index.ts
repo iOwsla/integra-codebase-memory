@@ -166,7 +166,14 @@ export class HistoryService {
     };
   }
   private eligible(path: string) {
-    this.path(path);
+    // Git history can contain paths excluded from the current source policy.
+    // Skip these collection candidates; explicit query paths still fail closed.
+    try {
+      this.path(path);
+    } catch (error) {
+      if (error instanceof CodeMemoryError && error.code === "PATH_OUT_OF_SCOPE") return false;
+      throw error;
+    }
     const include = this.context.effectiveConfig.include;
     return (
       !watchPolicy(this.context)(resolve(this.context.canonicalRoot, path)) &&
