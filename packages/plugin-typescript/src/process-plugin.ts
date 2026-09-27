@@ -26,7 +26,10 @@ export class ProcessTypeScriptPlugin extends TypeScriptPlugin {
     return new Promise((resolve, reject) => {
       const child = spawn(
         process.execPath,
-        [fileURLToPath(new URL("./worker.ts", import.meta.url))],
+        [
+          ...(process.versions.bun ? ["--smol"] : []),
+          fileURLToPath(new URL("./worker.ts", import.meta.url)),
+        ],
         { stdio: ["pipe", "pipe", "pipe"] },
       );
       const analysis: Analysis = { symbols: [], edges: [], unresolved: [], diagnostics: [] };

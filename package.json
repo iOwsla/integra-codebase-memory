@@ -20,6 +20,7 @@
     "db:migrate": "bun scripts/migrate.ts",
     "db:status": "bun scripts/migrate.ts --status",
     "benchmark": "bun scripts/benchmark.ts",
+    "profile:project": "bun scripts/profile-project.ts",
     "verify:parser": "bun scripts/verify-parser.ts",
     "profile:parser": "bun scripts/profile-parser.ts",
     "simulate:project": "bun scripts/simulate-project.ts",

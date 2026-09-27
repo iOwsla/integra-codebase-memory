@@ -14,7 +14,7 @@ import {
 } from "./cli-state";
 import { CliProgress } from "./progress";
 import { databaseUrl, readService } from "./service-state";
-import { dockerExecutable, run, setupServices } from "./services";
+import { dockerCommand, run, setupServices } from "./services";
 
 const print = (value: unknown) => console.log(JSON.stringify(value, null, 2));
 async function indexProject(root: string, managed: boolean) {
@@ -55,7 +55,7 @@ export function registerManagementCommands(cli: Command) {
       (s) => ({ configured: true, port: s.port }),
       () => ({ configured: false }),
     );
-    const docker = await run([dockerExecutable(), "info", "--format", "{{.OSType}}"]).catch(() => ({
+    const docker = await run([...dockerCommand(), "info", "--format", "{{.OSType}}"]).catch(() => ({
       code: 1,
       out: "",
     }));
@@ -78,6 +78,7 @@ export function registerManagementCommands(cli: Command) {
         "--project <absolute-path>",
         "Reapply selected registration and index it after service health checks",
       )
+      .option("--fresh-engine", "Start an empty engine and archive the previous local credentials")
       .action(async (options) => {
         const root = options.project
           ? (await createProjectContext(options.project)).canonicalRoot
@@ -88,7 +89,12 @@ export function registerManagementCommands(cli: Command) {
         if (root && !selected?.managed)
           throw new Error("Select an enabled managed project from projects list.");
         if (selected) await installProject(selected.root, selected.client, false, true);
-        print(await setupServices({ restart: operation === "restart" }));
+        print(
+          await setupServices({
+            restart: operation === "restart",
+            freshEngine: options.freshEngine,
+          }),
+        );
         if (selected) {
           print(await installProject(selected.root, selected.client, true, true));
           print(await indexProject(selected.root, true));

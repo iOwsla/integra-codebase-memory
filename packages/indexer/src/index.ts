@@ -1,3 +1,5 @@
+import { type FSWatcher as NativeWatcher, watch as watchNative } from "node:fs";
+import { resolve } from "node:path";
 import type {
   FileScanner,
   IndexProgress,
@@ -43,7 +45,12 @@ export class IndexService {
           JSON.stringify([
             this.context.indexVersion,
             this.plugin.version,
-            this.context.effectiveConfig,
+            {
+              maxFileSizeBytes: this.context.effectiveConfig.maxFileSizeBytes,
+              include: this.context.effectiveConfig.include,
+              exclude: this.context.effectiveConfig.exclude,
+              excludeGenerated: this.context.effectiveConfig.excludeGenerated,
+            },
             [...scan.configs].sort(),
           ]),
         );
@@ -131,7 +138,7 @@ export class IndexService {
   }
 }
 export class ProjectSession {
-  private watcher?: FSWatcher;
+  private watcher?: FSWatcher | NativeWatcher;
   private timer?: ReturnType<typeof setTimeout>;
   private reconcile?: ReturnType<typeof setInterval>;
   private running?: Promise<void>;
@@ -157,13 +164,27 @@ export class ProjectSession {
     if (this.closing) return;
     if (this.watch) {
       this.observe("watch", this.context.canonicalRoot);
-      this.watcher = chokidar.watch(this.context.canonicalRoot, {
-        ignoreInitial: true,
-        followSymlinks: false,
-        ignored: watchPolicy(this.context),
-        awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 25 },
-      });
-      this.watcher.on("all", (_event, path) => this.schedule(path));
+      const ignored = watchPolicy(this.context);
+      if (process.platform === "darwin")
+        this.watcher = watchNative(
+          this.context.canonicalRoot,
+          { recursive: true },
+          (_event, name) => {
+            const path = name
+              ? resolve(this.context.canonicalRoot, String(name))
+              : this.context.canonicalRoot;
+            if (!ignored(path)) this.schedule(path);
+          },
+        );
+      else {
+        this.watcher = chokidar.watch(this.context.canonicalRoot, {
+          ignoreInitial: true,
+          followSymlinks: false,
+          ignored,
+          awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 25 },
+        });
+        this.watcher.on("all", (_event, path) => this.schedule(path));
+      }
       this.watcher.on("error", () => {
         this.lastError = "WATCH_ERROR";
       });

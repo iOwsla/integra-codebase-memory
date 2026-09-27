@@ -20,7 +20,7 @@ try {
   process.exitCode = await child.exited;
 } catch {
   console.error(
-    "Managed CodeMemory database configuration is unavailable. Rerun the managed installer and start Docker Desktop/Engine.",
+    "Managed CodeMemory database configuration is unavailable. Rerun the managed installer and start the selected local Docker Desktop, OrbStack or Docker Engine.",
   );
   process.exitCode = 1;
 }

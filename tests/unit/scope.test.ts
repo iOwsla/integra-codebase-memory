@@ -1,4 +1,4 @@
-import { symlink } from "node:fs/promises";
+import { symlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { RepositoryScanner } from "@codememory/indexer";
 import { contains, createProjectContext, safePath } from "@codememory/shared";
@@ -137,6 +137,21 @@ it("shares root codememoryignore rules between scanning and watching with local 
       expect(ignored(resolve(f.root, path))).toBe(true);
     expect(ignored(resolve(f.root, "keep.report.ts"))).toBe(false);
     expect(ignored(resolve(f.root, ".codememoryignore"))).toBe(false);
+  } finally {
+    await f.dispose();
+  }
+});
+it("refreshes cached watcher ignore rules when the file changes", async () => {
+  const { watchPolicy } = await import("../../packages/indexer/src/watch-policy");
+  const f = await fixture({ ".gitignore": "old.ts\n", "old.ts": "", "new.ts": "" });
+  try {
+    const c = await createProjectContext(f.root);
+    const ignored = watchPolicy(c);
+    expect(ignored(resolve(f.root, "old.ts"))).toBe(true);
+    expect(ignored(resolve(f.root, "new.ts"))).toBe(false);
+    await writeFile(resolve(f.root, ".gitignore"), "new.ts\n");
+    expect(ignored(resolve(f.root, "old.ts"))).toBe(false);
+    expect(ignored(resolve(f.root, "new.ts"))).toBe(true);
   } finally {
     await f.dispose();
   }

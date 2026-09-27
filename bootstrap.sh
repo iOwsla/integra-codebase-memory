@@ -32,7 +32,7 @@ project=$(CDPATH= cd -- "$project" && pwd -P)
 case "$client" in codex|claude|both) ;; *) fail 'Select --client codex, claude or both.' ;; esac
 case "$install_dir" in /*) ;; *) fail '--install-dir must be absolute.' ;; esac
 if [ "$apply" = false ]; then
-  printf 'Preview: install %s in %s and configure %s for %s. Docker and managed PostgreSQL are prepared unless --skip-services is selected. Add --write to apply.\n' "$version" "$install_dir" "$client" "$project"
+  printf 'Preview: install %s in %s and configure %s for %s. A local container engine and managed PostgreSQL are prepared unless --skip-services is selected. Add --write to apply.\n' "$version" "$install_dir" "$client" "$project"
   exit 0
 fi
 for dependency in git bun; do

@@ -58,6 +58,7 @@ export interface IndexedFile {
   status: "INDEXED" | "SKIPPED_TOO_LARGE" | "SKIPPED_BINARY" | "INDEX_ERROR";
   content: string;
   parserVersion: string;
+  analysisHash?: string;
   error?: string;
 }
 export interface CodeSymbol {

@@ -1,14 +1,17 @@
 import { existsSync } from "node:fs";
 import { lstat, mkdir, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { PostgresStore } from "@codememory/database";
 import { runtimeRoot } from "../runtime-root";
 import {
+  archiveService,
   checkLocalPath,
   composeDefinition,
   composeProject,
   createService,
   databaseUrl,
+  markServiceReady,
   readService,
   serviceDirectory,
   volumeName,
@@ -35,7 +38,10 @@ export const run: Run = async (command, interactive = false) => {
 export function dockerExecutable(platform: NodeJS.Platform = process.platform) {
   const candidates =
     platform === "darwin"
-      ? ["/Applications/Docker.app/Contents/Resources/bin/docker"]
+      ? [
+          resolve(homedir(), ".orbstack/bin/docker"),
+          "/Applications/Docker.app/Contents/Resources/bin/docker",
+        ]
       : platform === "win32"
         ? [
             resolve(
@@ -50,13 +56,28 @@ export function dockerExecutable(platform: NodeJS.Platform = process.platform) {
         : [];
   return Bun.which("docker") || candidates.find(existsSync) || "docker";
 }
+export function dockerCommand(platform: NodeJS.Platform = process.platform) {
+  const context =
+    process.env.CODEMEMORY_DOCKER_CONTEXT ||
+    (platform === "darwin" && existsSync("/Applications/OrbStack.app") ? "orbstack" : "");
+  return [dockerExecutable(platform), ...(context ? ["--context", context] : [])];
+}
 export async function ensureDocker(
   execute: Run = run,
   platform: NodeJS.Platform = process.platform,
 ) {
   if (process.env.DOCKER_HOST && !/^(unix:|npipe:)/.test(process.env.DOCKER_HOST))
     throw new Error("Managed setup refuses remote DOCKER_HOST. Select a local Docker engine.");
-  let command = [dockerExecutable(platform)];
+  let command = dockerCommand(platform);
+  const context = await execute([
+    ...command,
+    "context",
+    "inspect",
+    "--format",
+    "{{.Endpoints.docker.Host}}",
+  ]).catch(() => ({ code: 1, out: "" }));
+  if (!process.env.DOCKER_HOST && context.code === 0 && !/^(unix:|npipe:)/.test(context.out.trim()))
+    throw new Error("Managed setup requires a local Docker context.");
   let ready = await execute([...command, "info", "--format", "{{.OSType}}"]).catch(() => ({
     code: 1,
     out: "",
@@ -77,12 +98,16 @@ export async function ensureDocker(
             "-File",
             resolve(here, "ensure-docker.ps1"),
           ]
-        : ["sh", resolve(here, "ensure-docker.sh")];
+        : [
+            "sh",
+            resolve(here, "ensure-docker.sh"),
+            ...(platform === "darwin" && command.includes("orbstack") ? ["orbstack"] : []),
+          ];
     if ((await execute(helper, true)).code !== 0)
       throw new Error(
         "Docker preparation is incomplete. Follow the message above and rerun the same installer; project configuration has not been applied.",
       );
-    command = [dockerExecutable(platform)];
+    command = dockerCommand(platform);
     if (platform === "linux") {
       const direct = await execute([...command, "info", "--format", "{{.OSType}}"]);
       if (direct.code !== 0) command = ["sudo", ...command];
@@ -96,20 +121,21 @@ export async function ensureDocker(
   }
   if (ready.code !== 0)
     throw new Error(
-      "Docker is not ready after 180 seconds. Complete Desktop setup, check virtualization/restart, then rerun.",
+      "Docker engine is not ready after 180 seconds. Complete Docker Desktop or OrbStack setup, then rerun.",
     );
   if (ready.out.trim() !== "linux")
-    throw new Error("Select Linux containers in Docker Desktop, then rerun.");
+    throw new Error("Select a local Linux container engine, then rerun.");
   if ((await execute([...command, "compose", "version"])).code !== 0)
     throw new Error("Docker Compose is missing. Install its plugin and rerun.");
-  const context = await execute([
+  const activeContext = await execute([
     ...command,
     "context",
     "inspect",
     "--format",
     "{{.Endpoints.docker.Host}}",
   ]);
-  if (context.code !== 0 || !/^(unix:|npipe:)/.test(context.out.trim()))
+  const endpoint = process.env.DOCKER_HOST || activeContext.out.trim();
+  if ((!process.env.DOCKER_HOST && activeContext.code !== 0) || !/^(unix:|npipe:)/.test(endpoint))
     throw new Error("Managed setup requires a local Docker context.");
   return command;
 }
@@ -119,11 +145,16 @@ export async function setupServices(
     execute?: Run;
     migrate?: (url: string) => Promise<void>;
     restart?: boolean;
+    freshEngine?: boolean;
   } = {},
 ) {
   const directory = options.directory || serviceDirectory();
   const execute = options.execute || run;
   const docker = await ensureDocker(execute);
+  const identity = await execute([...docker, "info", "--format", "{{.ID}}"]);
+  const engineId = identity.out.trim();
+  if (identity.code !== 0 || !engineId)
+    throw new Error("Unable to identify the selected local Docker engine.");
   await checkLocalPath(directory);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const lock = resolve(directory, "setup.lock");
@@ -147,8 +178,24 @@ export async function setupServices(
         throw new Error(
           "Managed volume exists without its credentials. Restore service.json; refusing to adopt or replace data.",
         );
-      state = await createService(directory);
+      state = await createService(directory, engineId);
     }
+    if (
+      options.freshEngine &&
+      !existing &&
+      (state.engineId !== engineId || state.initialized !== false)
+    ) {
+      await archiveService(directory, state);
+      state = await createService(directory, engineId);
+    }
+    if (state.engineId && state.engineId !== engineId)
+      throw new Error(
+        "Managed PostgreSQL belongs to another Docker engine. Select its original context.",
+      );
+    if (!existing && state.initialized !== false)
+      throw new Error(
+        "Managed PostgreSQL volume is missing. Select its original Docker context or restore the volume.",
+      );
     if (existing) {
       const owner = await execute([
         ...docker,
@@ -227,6 +274,7 @@ export async function setupServices(
         await store.close();
       }
     }
+    await markServiceReady(directory, state, engineId);
     return { ready: true, port: state.port, directory };
   } finally {
     await rm(lock, { recursive: true, force: true });

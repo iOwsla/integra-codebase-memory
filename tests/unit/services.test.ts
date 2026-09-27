@@ -28,9 +28,13 @@ function engine(
       overrides(command) || {
         code: 0,
         out: command.includes("info")
-          ? "linux\n"
+          ? command.includes("{{.ID}}")
+            ? "test-engine\n"
+            : "linux\n"
           : command.includes("context")
-            ? "unix:///var/run/docker.sock\n"
+            ? command.includes("show")
+              ? "default\n"
+              : "unix:///var/run/docker.sock\n"
             : "",
       },
   );
@@ -47,6 +51,8 @@ it("keeps credentials and volume identity across repeated setup, ignores applica
     const compose = JSON.parse(await readFile(resolve(directory, "compose.json"), "utf8"));
     expect(compose.services.postgres.ports).toEqual(["127.0.0.1:55433:5432"]);
     expect(compose.services.postgres.restart).toBe("unless-stopped");
+    expect(compose.services.postgres.mem_limit).toBe("1g");
+    expect(compose.services.postgres.cpus).toBe(1);
     expect(compose.volumes.data.name).toBe(volumeName);
     await setupServices({
       directory,
@@ -60,6 +66,7 @@ it("keeps credentials and volume identity across repeated setup, ignores applica
       ),
     });
     expect(await readService(directory)).toEqual(first);
+    expect(first).toMatchObject({ engineId: "test-engine", initialized: true });
     expect(migrate).toHaveBeenCalledWith(databaseUrl(first));
     expect(await readdir(directory)).not.toContain("setup.lock");
   } finally {
@@ -164,6 +171,68 @@ it("stops on reboot-required/helper failure and refuses remote engines", async (
   const execute = engine();
   await expect(ensureDocker(execute)).rejects.toThrow("remote DOCKER_HOST");
   expect(execute).not.toHaveBeenCalled();
+});
+it("starts the selected OrbStack context without invoking the Docker Desktop installer", async () => {
+  let prepared = false;
+  const execute = engine((command) => {
+    if (command.includes("show")) return { code: 0, out: "orbstack\n" };
+    if (command.includes("inspect") && command.includes("context"))
+      return { code: 0, out: "unix:///Users/test/.orbstack/run/docker.sock\n" };
+    if (command[0] === "sh") {
+      prepared = true;
+      return { code: 0, out: "" };
+    }
+    if (command.includes("info") && !prepared) return { code: 1, out: "" };
+    return undefined;
+  });
+  await ensureDocker(execute, "darwin");
+  expect(execute.mock.calls.find(([command]) => command[0] === "sh")?.[0].at(-1)).toBe("orbstack");
+});
+it("refuses a different engine or a missing completed volume before Compose starts", async () => {
+  const f = await fixture({});
+  try {
+    const directory = resolve(f.root, "service");
+    const first = engine();
+    await setupServices({ directory, execute: first, migrate: async () => {} });
+    const missing = engine();
+    await expect(
+      setupServices({ directory, execute: missing, migrate: async () => {} }),
+    ).rejects.toThrow("volume is missing");
+    expect(missing.mock.calls.some(([command]) => command.includes("up"))).toBe(false);
+    const other = engine((command) =>
+      command.includes("{{.ID}}") ? { code: 0, out: "another-engine\n" } : undefined,
+    );
+    await expect(
+      setupServices({ directory, execute: other, migrate: async () => {} }),
+    ).rejects.toThrow("another Docker engine");
+    expect(other.mock.calls.some(([command]) => command.includes("up"))).toBe(false);
+  } finally {
+    await f.dispose();
+  }
+});
+it("starts a fresh engine only when requested and keeps the previous credentials", async () => {
+  const f = await fixture({});
+  try {
+    const directory = resolve(f.root, "service");
+    await setupServices({ directory, execute: engine(), migrate: async () => {} });
+    const old = await readService(directory);
+    const other = engine((command) =>
+      command.includes("info") && command.includes("{{.ID}}")
+        ? { code: 0, out: "new-engine\n" }
+        : undefined,
+    );
+    await setupServices({ directory, execute: other, migrate: async () => {}, freshEngine: true });
+    expect(await readService(directory)).toMatchObject({
+      engineId: "new-engine",
+      initialized: true,
+    });
+    expect(
+      JSON.parse(await readFile(resolve(directory, `service.${old.instance}.json`), "utf8")),
+    ).toEqual(old);
+    expect((await readService(directory)).instance).not.toBe(old.instance);
+  } finally {
+    await f.dispose();
+  }
 });
 it("generates no destructive commands or external database target", async () => {
   const f = await fixture({});

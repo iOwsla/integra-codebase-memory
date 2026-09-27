@@ -76,7 +76,7 @@ unlimited inference or automatic truth: [setup, approval and limits](docs/memory
 
 ## Quick start
 
-Open a terminal **in the project you want to index**. Install **Bun 1.3.3+** and **Git** first. The bootstrap prepares the shared CLI, Docker and a dedicated PostgreSQL service. Docker permissions, first-run setup or a Windows reboot can require interaction. Releases currently require Bun and workspace dependencies; they are not standalone binaries.
+Open a terminal **in the project you want to index**. Install **Bun 1.3.3+** and **Git** first. The bootstrap prepares the shared CLI, a local container engine and a dedicated PostgreSQL service. On macOS, CodeMemory prefers OrbStack when installed without changing your global Docker context; Docker Desktop remains supported. Engine permissions, first-run setup or a Windows reboot can require interaction. Releases currently require Bun and workspace dependencies; they are not standalone binaries.
 
 Choose `codex`, `claude` or `both`. The examples below configure both clients. Omit `--write` / `-Write` to preview the selected-project installation.
 

@@ -119,4 +119,10 @@ CREATE TABLE history_cursors(
 repository_id text NOT NULL, worktree_id text NOT NULL, stream text NOT NULL, data jsonb NOT NULL,
 updated_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(repository_id,worktree_id,stream),
 FOREIGN KEY(repository_id,worktree_id) REFERENCES history_worktrees(repository_id,id) ON DELETE CASCADE);`,
+  // The paginated composite indexes have the same leading columns as these two
+  // legacy indexes. Keep the query paths while reducing write amplification.
+  `DROP INDEX IF EXISTS edges_in;
+DROP INDEX IF EXISTS edges_out;`,
+  `CREATE INDEX edges_file ON symbol_edges(repository_id,file_id);
+CREATE INDEX unresolved_file ON unresolved_references(repository_id,(data->>'fileId'));`,
 ];

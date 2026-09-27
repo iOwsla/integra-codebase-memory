@@ -3,6 +3,15 @@ set -eu
 # Called only by an explicitly applied managed installation.
 case "$(uname -s)" in
   Darwin)
+    if [ "${1:-}" = orbstack ]; then
+      if [ ! -d /Applications/OrbStack.app ]; then
+        echo 'OrbStack context is selected but OrbStack.app is missing. Install OrbStack or select a local Docker context.' >&2
+        exit 1
+      fi
+      open -a /Applications/OrbStack.app
+      echo 'Waiting for the selected OrbStack engine...' >&2
+      exit 0
+    fi
     if [ ! -d /Applications/Docker.app ]; then
       case "$(uname -m)" in arm64) arch=arm64 ;; x86_64) arch=amd64 ;; *) echo 'Unsupported Mac architecture.' >&2; exit 1 ;; esac
       temp=$(mktemp -d)

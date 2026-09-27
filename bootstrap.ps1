@@ -48,7 +48,7 @@ if (-not $InstallDir) {
 Assert-AbsolutePath $InstallDir
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 if (-not $Write) {
-    Write-Output "Preview: install $version in $InstallDir and configure $Client for $Project. Docker and managed PostgreSQL are prepared unless -SkipServices is selected. Add -Write to apply."
+    Write-Output "Preview: install $version in $InstallDir and configure $Client for $Project. A local container engine and managed PostgreSQL are prepared unless -SkipServices is selected. Add -Write to apply."
     return
 }
 foreach ($dependency in @('git', 'bun')) {

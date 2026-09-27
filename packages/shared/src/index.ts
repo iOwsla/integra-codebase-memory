@@ -9,6 +9,12 @@ const processStartedAt = new Date().toISOString();
 export const runtimeInfo = () => ({ version, pid: process.pid, startedAt: processStartedAt });
 export const hash = (value: string | Uint8Array) =>
   createHash("sha256").update(value).digest("hex");
+/** Keep bounded text within UTF-16 limits without splitting a Unicode code point. */
+export function truncateUnicode(value: string, maxCodeUnits: number) {
+  const result = value.slice(0, maxCodeUnits);
+  const last = result.charCodeAt(result.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? result.slice(0, -1) : result;
+}
 export const id = (...parts: string[]) => hash(JSON.stringify(parts));
 export const configSchema = z
   .object({
@@ -24,7 +30,7 @@ export const configSchema = z
     exclude: z.array(z.string().max(500)).max(100).default([]),
     excludeGenerated: z.boolean().default(false),
     debounceMs: z.number().int().min(50).max(10000).default(300),
-    reconcileMs: z.number().int().min(1000).max(3600000).default(30000),
+    reconcileMs: z.number().int().min(1000).max(3600000).default(300000),
   })
   .strict();
 export function contains(root: string, path: string): boolean {

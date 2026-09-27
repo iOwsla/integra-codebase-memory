@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
@@ -10,6 +10,8 @@ export const serviceSchema = z
     instance: z.string().uuid(),
     password: z.string().regex(/^[a-f0-9]{64}$/),
     port: z.literal(55433),
+    engineId: z.string().min(1).max(256).optional(),
+    initialized: z.boolean().optional(),
   })
   .strict();
 export type ServiceState = z.infer<typeof serviceSchema>;
@@ -49,7 +51,7 @@ export async function readService(directory = serviceDirectory()) {
     );
   }
 }
-export async function createService(directory = serviceDirectory()) {
+export async function createService(directory = serviceDirectory(), engineId?: string) {
   await checkLocalPath(directory);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const path = resolve(directory, "service.json");
@@ -58,6 +60,7 @@ export async function createService(directory = serviceDirectory()) {
     instance: randomUUID(),
     password: randomBytes(32).toString("hex"),
     port: 55433,
+    ...(engineId ? { engineId, initialized: false } : {}),
   };
   try {
     await writeFile(path, `${JSON.stringify(state)}\n`, { flag: "wx", mode: 0o600 });
@@ -65,6 +68,33 @@ export async function createService(directory = serviceDirectory()) {
     if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
   }
   return readService(directory);
+}
+export async function archiveService(directory: string, state: ServiceState) {
+  const source = resolve(directory, "service.json");
+  const backup = resolve(directory, `service.${state.instance}.json`);
+  await checkLocalPath(source);
+  await checkLocalPath(backup);
+  const existing = await lstat(backup).catch((e: NodeJS.ErrnoException) => {
+    if (e.code !== "ENOENT") throw e;
+    return null;
+  });
+  if (existing) throw new Error("A backup for this managed service already exists.");
+  await rename(source, backup);
+  return backup;
+}
+export async function markServiceReady(directory: string, state: ServiceState, engineId: string) {
+  const path = resolve(directory, "service.json");
+  await checkLocalPath(path);
+  const temp = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temp, `${JSON.stringify({ ...state, engineId, initialized: true })}\n`, {
+      flag: "wx",
+      mode: 0o600,
+    });
+    await rename(temp, path);
+  } finally {
+    await rm(temp, { force: true });
+  }
 }
 export const databaseUrl = (state: ServiceState) =>
   `postgresql://codememory:${state.password}@127.0.0.1:${state.port}/codememory`;
@@ -76,6 +106,8 @@ export function composeDefinition(state: ServiceState) {
       postgres: {
         image: "pgvector/pgvector:pg17",
         restart: "unless-stopped",
+        mem_limit: "1g",
+        cpus: 1,
         environment: {
           POSTGRES_USER: "codememory",
           POSTGRES_PASSWORD: state.password,

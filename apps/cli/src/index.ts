@@ -61,7 +61,7 @@ async function open(project?: string, progress?: CliProgress) {
     context,
     store,
     new RepositoryScanner(progress?.scan),
-    new TypeScriptPlugin(undefined, progress?.parser),
+    new ProcessTypeScriptPlugin(undefined, progress?.parser),
     progress?.stage,
   );
   const service = new CodebaseService(context, store);

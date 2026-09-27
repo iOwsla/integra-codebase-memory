@@ -408,9 +408,13 @@ export class CompilerWorkspace {
           return resolution;
         });
       const started = observe ? performance.now() : 0;
-      const program = ts.createProgram({ rootNames: roots, options, host });
+      let program: ts.Program | undefined = ts.createProgram({ rootNames: roots, options, host });
       observe?.(performance.now() - started, roots.length);
       yield { program, roots, config };
+      // The caller has finished this group before the generator resumes.
+      // Release its compiler graph before constructing the next one.
+      program = undefined;
+      if (process.versions.bun) Bun.gc(true);
     }
   }
 }

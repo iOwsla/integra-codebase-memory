@@ -54,6 +54,30 @@ it("config/parser fingerprint invalidates unchanged files and parser diagnostics
     await db.dispose();
   }
 });
+it("does not reanalyze source when only watcher timing changes", async () => {
+  const db = await testDatabase();
+  const f = await fixture({ "a.ts": "export const a=1" });
+  try {
+    const c = await createProjectContext(f.root);
+    await db.store.register(c);
+    await new IndexService(c, db.store, new RepositoryScanner(), new TypeScriptPlugin()).index();
+    const updated = {
+      ...c,
+      effectiveConfig: { ...c.effectiveConfig, reconcileMs: 600000, debounceMs: 1000 },
+    };
+    const result = await new IndexService(
+      updated,
+      db.store,
+      new RepositoryScanner(),
+      new TypeScriptPlugin(),
+    ).index();
+    expect(result.reason).toBe("UNCHANGED");
+    expect(result.changed).toBe(0);
+  } finally {
+    await f.dispose();
+    await db.dispose();
+  }
+});
 it("J: inferred receiver type change redirects calls from unchanged dependent files", async () => {
   const db = await testDatabase(),
     f = await fixture({
@@ -79,6 +103,68 @@ it("J: inferred receiver type change redirects calls from unchanged dependent fi
       target = after.symbols.find((s) => s.qualifiedName === "B.run")?.id;
     expect(after.edges.some((e) => e.type === "CALLS" && e.target === target)).toBe(true);
     expect(after.edges.some((e) => e.type === "CALLS" && e.target === oldTarget)).toBe(false);
+  } finally {
+    await f.dispose();
+    await db.dispose();
+  }
+});
+it("retains relationships from unaffected files and removes deleted-file references", async () => {
+  const db = await testDatabase();
+  const f = await fixture({
+    "a.ts": "export function a(){return missingA()}",
+    "b.ts": "export function b(){return missingB()}",
+    "c.ts": "export function local(){} export function c(){return local()}",
+  });
+  try {
+    const c = await createProjectContext(f.root);
+    await db.store.register(c);
+    const index = new IndexService(c, db.store, new RepositoryScanner(), new TypeScriptPlugin());
+    await index.index();
+    const before = await db.store.snapshot(c);
+    const stable = before.edges.find((edge) =>
+      before.symbols.some((symbol) => symbol.id === edge.source && symbol.file === "c.ts"),
+    );
+    expect(stable).toBeDefined();
+    if (!stable) throw new Error("Expected a stable relationship");
+    const owner = before.files.find((file) => file.path === "c.ts")?.id;
+    expect(owner).toBeDefined();
+    const first = await db.store.pool.query(
+      "SELECT xmin::text AS created FROM symbol_edges WHERE repository_id=$1 AND id=$2",
+      [c.projectScopeId, stable.id],
+    );
+    await writeFile(resolve(f.root, "a.ts"), "export function a(){return 1}");
+    await index.index();
+    const second = await db.store.pool.query(
+      "SELECT xmin::text AS created,file_id FROM symbol_edges WHERE repository_id=$1 AND id=$2",
+      [c.projectScopeId, stable.id],
+    );
+    expect(second.rows).toEqual([{ created: first.rows[0].created, file_id: owner }]);
+    await rename(resolve(f.root, "b.ts"), resolve(f.root, "renamed.ts"));
+    await index.index();
+    const after = await db.store.snapshot(c);
+    const status = await db.store.status(c);
+    expect(status.last_run?.totals).toEqual({
+      files: after.files.length,
+      symbols: after.symbols.length,
+      edges: after.edges.length,
+      unresolvedReferences: after.unresolved.length,
+    });
+    expect([status.files, status.symbols, status.edges, status.unresolvedReferences]).toEqual([
+      after.files.length,
+      after.symbols.length,
+      after.edges.length,
+      after.unresolved.length,
+    ]);
+    const deletedId = before.files.find((file) => file.path === "b.ts")?.id;
+    const renamedId = after.files.find((file) => file.path === "renamed.ts")?.id;
+    expect(deletedId).toBeDefined();
+    expect(renamedId).toBeDefined();
+    expect(after.unresolved.some((reference) => reference.fileId === deletedId)).toBe(false);
+    expect(after.unresolved.some((reference) => reference.fileId === renamedId)).toBe(true);
+    await db.store.pool.query("UPDATE index_runs SET data=data-'totals' WHERE repository_id=$1", [
+      c.projectScopeId,
+    ]);
+    expect((await db.store.status(c)).edges).toBe(after.edges.length);
   } finally {
     await f.dispose();
     await db.dispose();

@@ -7,7 +7,7 @@ import type {
   ProjectContext,
   SymbolKind,
 } from "@codememory/core";
-import { hash, id } from "@codememory/shared";
+import { hash, id, truncateUnicode } from "@codememory/shared";
 import ts from "typescript";
 import { PrismaCatalog } from "./prisma-schema";
 import { PrismaUsage } from "./prisma-usage";
@@ -135,7 +135,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
         startColumn: start.character + 1,
         endLine: end.line + 1,
         endColumn: end.character + 1,
-        signature: text.slice(0, 500).split(/\r?\n/, 1)[0] ?? "",
+        signature: truncateUnicode(text, 500).split(/\r?\n/, 1)[0] ?? "",
         exported:
           (!!node.parent && ts.isExportAssignment(node.parent)) ||
           !!mods?.some(
@@ -403,7 +403,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
             code: d.code,
             ...(location ? { line: location.line + 1, column: location.character + 1 } : {}),
             file: root.file,
-            message: ts.flattenDiagnosticMessageText(d.messageText, " ").slice(0, 2000),
+            message: truncateUnicode(ts.flattenDiagnosticMessageText(d.messageText, " "), 2000),
           });
         }
         const lineOf = (node: ts.Node) =>
@@ -416,7 +416,10 @@ export class TypeScriptPlugin implements LanguagePlugin {
             source: owner.id,
             fileId: owner.fileId,
             line,
-            expression: sf.text.slice(offset, Math.min(node.getEnd(), offset + 300)),
+            expression: truncateUnicode(
+              sf.text.slice(offset, Math.min(node.getEnd(), offset + 300)),
+              300,
+            ),
             reason: "Dynamic, external, excluded, or not statically resolved within project scope",
             type,
           });

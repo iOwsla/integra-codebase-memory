@@ -100,12 +100,14 @@ it("uses physical PostgreSQL relationship indexes for selective model-usage look
       [c.projectScopeId, "bulk-5000", "REFERENCES"],
     );
     const plan = JSON.stringify(explained.rows[0]);
-    expect(plan).toMatch(/edges_in(?:_page)?/);
-    expect(
-      (
-        await db.store.pool.query("SELECT indexname FROM pg_indexes WHERE tablename='symbol_edges'")
-      ).rows.map((r) => r.indexname),
-    ).toContain("edges_in_page");
+    expect(plan).toMatch(/edges_in_page/);
+    const indexes = (
+      await db.store.pool.query("SELECT indexname FROM pg_indexes WHERE tablename='symbol_edges'")
+    ).rows.map((r) => r.indexname);
+    expect(indexes).toContain("edges_in_page");
+    expect(indexes).toContain("edges_file");
+    expect(indexes).not.toContain("edges_in");
+    expect(indexes).not.toContain("edges_out");
   } finally {
     await db.dispose();
     await f.dispose();

@@ -7,6 +7,30 @@ import picomatch from "picomatch";
 /** Chokidar pruning callback: never descend into excluded directories. */
 export function watchPolicy(context: ProjectContext) {
   const exclude = picomatch([...context.effectiveConfig.exclude]);
+  const ruleCache = new Map<
+    string,
+    { mtimeMs: number; ctimeMs: number; size: number; rules: ReturnType<typeof ignore> }
+  >();
+  const rulesFor = (file: string) => {
+    try {
+      const stat = lstatSync(file);
+      if (stat.isSymbolicLink() || stat.size > 65536) return;
+      const cached = ruleCache.get(file);
+      if (
+        cached &&
+        cached.mtimeMs === stat.mtimeMs &&
+        cached.ctimeMs === stat.ctimeMs &&
+        cached.size === stat.size
+      )
+        return cached.rules;
+      const rules = ignore().add(readFileSync(file, "utf8"));
+      ruleCache.set(file, { mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, size: stat.size, rules });
+      return rules;
+    } catch {
+      ruleCache.delete(file);
+      return;
+    }
+  };
   return (candidate: string) => {
     const path = resolve(candidate),
       root = context.canonicalRoot;
@@ -14,6 +38,12 @@ export function watchPolicy(context: ProjectContext) {
     if (path === root) return false;
     const rel = slash(relative(root, path));
     if (forbidden(rel) || exclude(rel) || exclude(`${rel}/`)) return true;
+    let directory = false;
+    try {
+      directory = lstatSync(path).isDirectory();
+    } catch {
+      /* Removed paths still need reconciliation. */
+    }
     let current = path;
     while (contains(root, current) && current !== root) {
       try {
@@ -28,19 +58,8 @@ export function watchPolicy(context: ProjectContext) {
     current = dirname(path);
     while (contains(root, current)) {
       for (const ignoreName of [".gitignore", ...(current === root ? [".codememoryignore"] : [])]) {
-        const gi = resolve(current, ignoreName);
-        try {
-          const stat = lstatSync(gi);
-          if (!stat.isSymbolicLink() && stat.size <= 65536) {
-            const rules = ignore().add(readFileSync(gi, "utf8"));
-            const local = slash(relative(current, path));
-            let directory = false;
-            try {
-              directory = lstatSync(path).isDirectory();
-            } catch {}
-            if (rules.ignores(local + (directory ? "/" : ""))) return true;
-          }
-        } catch {}
+        const rules = rulesFor(resolve(current, ignoreName));
+        if (rules?.ignores(slash(relative(current, path)) + (directory ? "/" : ""))) return true;
       }
       if (current === root) break;
       current = dirname(current);

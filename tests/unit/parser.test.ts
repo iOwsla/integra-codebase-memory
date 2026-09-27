@@ -80,6 +80,22 @@ it("regression-002: nested unresolved calls have distinct identities", async () 
   expect(a.unresolved.filter((u) => u.type === "CALLS")).toHaveLength(2);
   expect(new Set(a.unresolved.map((u) => u.id)).size).toBe(a.unresolved.length);
 });
+it("keeps a truncated unresolved expression valid when an emoji crosses its boundary", async () => {
+  const f = await fixture({
+    "main.ts": `export function run(){ missing("${"a".repeat(290)}😀"); }`,
+  });
+  try {
+    const c = await createProjectContext(f.root);
+    const s = await new RepositoryScanner().scan(c);
+    const a = await new TypeScriptPlugin().analyze(c, s.files, s.configs);
+    const expression = a.unresolved.find((u) => u.expression.startsWith("missing("))?.expression;
+    expect(expression).toBeDefined();
+    expect(expression?.length).toBe(299);
+    expect(expression).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/u);
+  } finally {
+    await f.dispose();
+  }
+});
 it("regression-003: exported values, binding elements, overload ranges and accessors retain structure", async () => {
   const c = await createProjectContext(
       resolve("tests/fixtures/typescript/regression-003-declarations"),

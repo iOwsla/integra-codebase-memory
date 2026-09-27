@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   IndexMetadata,
   IndexProgress,
@@ -227,35 +228,124 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
     await this.query("BEGIN");
     try {
       const scope = c.projectScopeId;
-      await this.query("DELETE FROM symbol_edges WHERE repository_id=$1", [scope]);
-      await this.query("DELETE FROM unresolved_references WHERE repository_id=$1", [scope]);
+      const timed = async (phase: string, rows: number, action: () => Promise<unknown>) => {
+        const started = performance.now();
+        await action();
+        if (process.env.CODEMEMORY_PROFILE === "1")
+          log("info", "index_publish_phase", {
+            phase,
+            rows,
+            durationMs: Math.round(performance.now() - started),
+          });
+      };
+      const previous = (
+        await this.query(
+          "SELECT id,path,data->>'analysisHash' AS analysis_hash FROM files WHERE repository_id=$1",
+          [scope],
+        )
+      ).rows as { id: string; path: string; analysis_hash: string | null }[];
+      const previousHashes = new Map(previous.map((file) => [file.id, file.analysis_hash]));
+      const digests = new Map(s.files.map((file) => [file.id, createHash("sha256")]));
+      let hashed = 0;
+      const digestRows = (kind: string, rows: { fileId: string }[]) => {
+        for (const row of rows) {
+          const digest = digests.get(row.fileId);
+          if (!digest) throw new Error(`Analysis refers to an unknown file: ${row.fileId}`);
+          digest.update(kind).update("\0").update(JSON.stringify(row)).update("\0");
+          if (++hashed % 50000 === 0 && process.versions.bun) Bun.gc(true);
+        }
+      };
+      digestRows("symbol", s.symbols);
+      digestRows("edge", s.edges);
+      digestRows("unresolved", s.unresolved);
+      const affected = new Set<string>();
+      for (const file of s.files) {
+        const digest = digests.get(file.id);
+        if (!digest) throw new Error(`Missing analysis digest for ${file.id}`);
+        file.analysisHash = digest.digest("hex");
+        if (previousHashes.get(file.id) !== file.analysisHash) affected.add(file.id);
+      }
+      const deletedPaths = new Set(deleted);
+      const deletedIds = previous
+        .filter((file) => deletedPaths.has(file.path))
+        .map((file) => file.id);
+      const allAffected = [...affected, ...deletedIds];
+      const replaceAll = !s.version || affected.size > s.files.length * 0.7;
+      await timed("remove_edges", allAffected.length, () =>
+        this.query(
+          replaceAll
+            ? "DELETE FROM symbol_edges WHERE repository_id=$1"
+            : "DELETE FROM symbol_edges WHERE repository_id=$1 AND file_id=ANY($2::text[])",
+          replaceAll ? [scope] : [scope, allAffected],
+        ),
+      );
+      await timed("remove_unresolved", allAffected.length, () =>
+        this.query(
+          replaceAll
+            ? "DELETE FROM unresolved_references WHERE repository_id=$1"
+            : "DELETE FROM unresolved_references WHERE repository_id=$1 AND data->>'fileId'=ANY($2::text[])",
+          replaceAll ? [scope] : [scope, allAffected],
+        ),
+      );
       await this.query("DELETE FROM files WHERE repository_id=$1 AND path=ANY($2::text[])", [
         scope,
         deleted,
       ]);
       const batches = async (rows: unknown[], query: string) => {
-        for (let offset = 0; offset < rows.length; offset += 500)
-          await this.query(query, [scope, JSON.stringify(rows.slice(offset, offset + 500))]);
+        let records: string[] = [];
+        let bytes = 2;
+        const flush = async () => {
+          if (!records.length) return;
+          await this.query(query, [scope, `[${records.join(",")}]`]);
+          records = [];
+          bytes = 2;
+        };
+        for (const row of rows) {
+          const record = JSON.stringify(row);
+          const size = Buffer.byteLength(record) + 1;
+          if (records.length && (records.length >= 10000 || bytes + size > 4 * 1024 * 1024))
+            await flush();
+          records.push(record);
+          bytes += size;
+        }
+        await flush();
       };
-      await batches(
-        s.files.filter((f) => changed.includes(f.path)),
-        `INSERT INTO files(repository_id,id,path,data) SELECT $1,j->>'id',j->>'path',j FROM jsonb_array_elements($2::jsonb) j ON CONFLICT(repository_id,id) DO UPDATE SET data=EXCLUDED.data,path=EXCLUDED.path`,
+      const changedPaths = new Set(changed);
+      const changedFiles = s.files.filter((f) => changedPaths.has(f.path) || affected.has(f.id));
+      await timed("files", changedFiles.length, () =>
+        batches(
+          changedFiles,
+          `INSERT INTO files(repository_id,id,path,data) SELECT $1,j->>'id',j->>'path',j FROM jsonb_array_elements($2::jsonb) j ON CONFLICT(repository_id,id) DO UPDATE SET data=EXCLUDED.data,path=EXCLUDED.path`,
+        ),
       );
-      await this.query("DELETE FROM symbols WHERE repository_id=$1 AND NOT(id=ANY($2::text[]))", [
-        scope,
-        s.symbols.map((x) => x.id),
-      ]);
-      await batches(
-        s.symbols,
-        `INSERT INTO symbols(repository_id,id,file_id,name,qualified_name,data) SELECT $1,j->>'id',j->>'fileId',j->>'name',j->>'qualifiedName',j FROM jsonb_array_elements($2::jsonb) j ON CONFLICT(repository_id,id) DO UPDATE SET data=EXCLUDED.data,name=EXCLUDED.name,qualified_name=EXCLUDED.qualified_name WHERE symbols.data IS DISTINCT FROM EXCLUDED.data`,
+      if (s.version > 1)
+        await timed("remove_symbols", s.symbols.length, () =>
+          this.query("DELETE FROM symbols WHERE repository_id=$1 AND NOT(id=ANY($2::text[]))", [
+            scope,
+            s.symbols.map((x) => x.id),
+          ]),
+        );
+      await timed("symbols", s.symbols.length, () =>
+        batches(
+          s.symbols,
+          `INSERT INTO symbols(repository_id,id,file_id,name,qualified_name,data) SELECT $1,j->>'id',j->>'fileId',j->>'name',j->>'qualifiedName',j FROM jsonb_array_elements($2::jsonb) j ON CONFLICT(repository_id,id) DO UPDATE SET data=EXCLUDED.data,name=EXCLUDED.name,qualified_name=EXCLUDED.qualified_name WHERE symbols.data IS DISTINCT FROM EXCLUDED.data`,
+        ),
       );
-      await batches(
-        s.edges,
-        `INSERT INTO symbol_edges(repository_id,id,source_id,target_id,file_id,edge_type,data) SELECT $1,j->>'id',j->>'source',j->>'target',j->>'fileId',j->>'type',j FROM jsonb_array_elements($2::jsonb) j`,
+      const edges = replaceAll ? s.edges : s.edges.filter((edge) => affected.has(edge.fileId));
+      await timed("edges", edges.length, () =>
+        batches(
+          edges,
+          `INSERT INTO symbol_edges(repository_id,id,source_id,target_id,file_id,edge_type,data) SELECT $1,j->>'id',j->>'source',j->>'target',j->>'fileId',j->>'type',j FROM jsonb_array_elements($2::jsonb) j`,
+        ),
       );
-      await batches(
-        s.unresolved,
-        `INSERT INTO unresolved_references(repository_id,id,data) SELECT $1,j->>'id',j FROM jsonb_array_elements($2::jsonb) j`,
+      const unresolved = replaceAll
+        ? s.unresolved
+        : s.unresolved.filter((reference) => affected.has(reference.fileId));
+      await timed("unresolved", unresolved.length, () =>
+        batches(
+          unresolved,
+          `INSERT INTO unresolved_references(repository_id,id,data) SELECT $1,j->>'id',j FROM jsonb_array_elements($2::jsonb) j`,
+        ),
       );
       await this.query(
         "UPDATE repositories SET version=$2,fingerprint=$3,indexed_at=$4,updated_at=now() WHERE id=$1",
@@ -263,7 +353,17 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
       );
       await this.query("INSERT INTO index_runs(repository_id,data) VALUES($1,$2)", [
         scope,
-        JSON.stringify({ ...run, sessionId: c.sessionId, diagnostics: s.diagnostics }),
+        JSON.stringify({
+          ...run,
+          sessionId: c.sessionId,
+          diagnostics: s.diagnostics,
+          totals: {
+            files: s.files.length,
+            symbols: s.symbols.length,
+            edges: s.edges.length,
+            unresolvedReferences: s.unresolved.length,
+          },
+        }),
       ]);
       await this.query("COMMIT");
     } catch (e) {
@@ -312,10 +412,10 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
       SELECT version,fingerprint,indexed_at,
       (version=0 OR EXISTS(SELECT 1 FROM gaps) OR EXISTS(SELECT 1 FROM diagnostics)) AS incomplete,
       (SELECT coalesce(jsonb_agg(errors),'[]'::jsonb) FROM (SELECT path,data->>'error' AS error FROM files WHERE repository_id=$1 AND data->>'status'='INDEX_ERROR' ORDER BY path LIMIT 20) errors) AS "fileErrors",
-      (SELECT count(*)::int FROM files WHERE repository_id=$1) AS files,
-      (SELECT count(*)::int FROM symbols WHERE repository_id=$1) AS symbols,
-      (SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1) AS edges,
-      (SELECT count(*)::int FROM unresolved_references WHERE repository_id=$1) AS "unresolvedReferences",
+      COALESCE((SELECT (data->'totals'->>'files')::int FROM last),(SELECT count(*)::int FROM files WHERE repository_id=$1)) AS files,
+      COALESCE((SELECT (data->'totals'->>'symbols')::int FROM last),(SELECT count(*)::int FROM symbols WHERE repository_id=$1)) AS symbols,
+      COALESCE((SELECT (data->'totals'->>'edges')::int FROM last),(SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1)) AS edges,
+      COALESCE((SELECT (data->'totals'->>'unresolvedReferences')::int FROM last),(SELECT count(*)::int FROM unresolved_references WHERE repository_id=$1)) AS "unresolvedReferences",
       (SELECT data || jsonb_build_object('diagnostics',(SELECT COALESCE(jsonb_agg(value ORDER BY ordinality),'[]'::jsonb) FROM page)) FROM last) AS last_run,
       jsonb_build_object('total',(SELECT count(*)::int FROM diagnostics),'affectedFiles',(SELECT count(DISTINCT value->>'file')::int FROM diagnostics)) AS "diagnosticSummary",
       (SELECT COALESCE(jsonb_agg(gaps ORDER BY reason),'[]'::jsonb) FROM gaps) AS "fileGaps",

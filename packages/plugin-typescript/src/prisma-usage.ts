@@ -1,5 +1,5 @@
 import type { CodeSymbol } from "@codememory/core";
-import { id } from "@codememory/shared";
+import { id, truncateUnicode } from "@codememory/shared";
 import ts from "typescript";
 import type { PrismaCatalog, PrismaGroup } from "./prisma-schema";
 
@@ -286,7 +286,7 @@ export class PrismaUsage {
         fileId: owner.fileId,
         line,
         type: "PRISMA_QUERY",
-        expression: node.getText(sf).slice(0, 300),
+        expression: truncateUnicode(node.getText(sf), 300),
         reason: "Prisma receiver resolved, but operation is dynamic, raw SQL, or unsupported",
       });
       return true;

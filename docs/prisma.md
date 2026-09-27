@@ -72,8 +72,10 @@ Missing references never establish unused models or fields.
 ## Storage, speed and upgrades
 
 Schema symbols and usage edges use the existing project-scoped PostgreSQL tables.
-The physical `edges_in`/`edges_in_page` and outgoing indexes support model lookup;
-no new migration or application database index is required. A disposable-database
+The physical `edges_in_page` and `edges_out_page` indexes support model lookup;
+the older, redundant prefix indexes are removed by a CodeMemory migration.
+Migration 9 indexes file ownership so changed files can replace their own
+relationships without rewriting the rest. No application database index is required. A disposable-database
 regression checks the actual query plan with 10,000 relationships. This is not a
 production latency guarantee or a large-monorepo concurrency benchmark.
 
