@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.33 — 2026-09-27
+
+- Prefer the local OrbStack engine on macOS while retaining Docker Desktop support. Bind managed PostgreSQL state to its engine, provide an explicit fresh-engine path, and cap the managed container at one CPU and 1 GiB.
+- Fix invalid Unicode in bounded TypeScript and Prisma previews that could abort publication on large projects.
+- Use the native recursive macOS watcher, cache ignore rules, reduce idle reconciliation, and release TypeScript compiler graphs between project groups.
+- Publish bounded database batches and selectively replace relationships for files whose analyzed records changed. Persist index totals for faster status reads, with compatibility for older generations.
+- Add a disposable-database project profiler and regressions for engine selection, graph replacement, Unicode boundaries, and status totals.
+
 ## 0.1.0-alpha.32 — 2026-09-19
 
 - Skip protected/out-of-scope Git collection candidates rather than aborting history scans with PATH_OUT_OF_SCOPE.

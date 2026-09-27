@@ -173,9 +173,9 @@ it("stops on reboot-required/helper failure and refuses remote engines", async (
   expect(execute).not.toHaveBeenCalled();
 });
 it("starts the selected OrbStack context without invoking the Docker Desktop installer", async () => {
+  vi.stubEnv("CODEMEMORY_DOCKER_CONTEXT", "orbstack");
   let prepared = false;
   const execute = engine((command) => {
-    if (command.includes("show")) return { code: 0, out: "orbstack\n" };
     if (command.includes("inspect") && command.includes("context"))
       return { code: 0, out: "unix:///Users/test/.orbstack/run/docker.sock\n" };
     if (command[0] === "sh") {
@@ -186,6 +186,11 @@ it("starts the selected OrbStack context without invoking the Docker Desktop ins
     return undefined;
   });
   await ensureDocker(execute, "darwin");
+  expect(
+    execute.mock.calls.some(
+      ([command]) => command.includes("--context") && command.includes("orbstack"),
+    ),
+  ).toBe(true);
   expect(execute.mock.calls.find(([command]) => command[0] === "sh")?.[0].at(-1)).toBe("orbstack");
 });
 it("refuses a different engine or a missing completed volume before Compose starts", async () => {
