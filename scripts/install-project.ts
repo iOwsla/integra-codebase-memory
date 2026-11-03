@@ -6,6 +6,7 @@ import { Command } from "commander";
 import { connectCodex } from "./connect-codex";
 import { runtimeRoot } from "./runtime-root";
 import { installManagementCli, saveRegistration, sharedEntry } from "./setup/cli-state";
+import { withInterruptSignal } from "./setup/interrupt";
 import { checkLocalPath, serviceDirectory } from "./setup/service-state";
 
 const serverRoot = runtimeRoot;
@@ -316,6 +317,18 @@ export async function installProject(
     next: "Open this project in the selected client, approve/reload its MCP connection if prompted, then call codebase_status. PostgreSQL must be running. Indexing starts when the client opens the connection.",
   };
 }
+type Activate = typeof import("./setup/activation").activateInstalledRuntime;
+/**
+ * The bootstrap upgrade activates through the shared update, so an interrupt rolls it back like
+ * `codememory update`. Preview and plain writes have no rollback and keep the default exit.
+ */
+export async function activateUpgrade(
+  registration: NonNullable<Parameters<Activate>[0]>,
+  activate?: Activate,
+) {
+  const run = activate ?? (await import("./setup/activation")).activateInstalledRuntime;
+  return withInterruptSignal((signal) => run(registration, { signal }));
+}
 if (import.meta.main && process.argv[1]?.endsWith("install-project.ts")) {
   const command = new Command()
     .description("Install CodeMemory only into an explicitly selected project")
@@ -348,15 +361,22 @@ if (import.meta.main && process.argv[1]?.endsWith("install-project.ts")) {
       options.upgrade,
     );
     if (options.write && options.upgrade) {
-      const { activateInstalledRuntime } = await import("./setup/activation");
-      const result = await activateInstalledRuntime({
+      const outcome = await activateUpgrade({
         root: preview.projectRoot,
         client: options.client as "codex" | "claude" | "both",
         managed: !!options.withServices,
         enabled: true,
       });
-      const selected = result.projects.find((p) => p.projectRoot === preview.projectRoot);
-      console.log(JSON.stringify({ ...selected, sharedUpdate: result }, null, 2));
+      if (outcome.ok) {
+        const result = outcome.value;
+        const selected = result.projects.find((p) => p.projectRoot === preview.projectRoot);
+        console.log(JSON.stringify({ ...selected, sharedUpdate: result }, null, 2));
+      } else {
+        console.error(
+          outcome.error instanceof Error ? outcome.error.message : "Installation failed",
+        );
+        process.exitCode = outcome.aborted ? 130 : 1;
+      }
     } else {
       if (options.write) {
         await installManagementCli();

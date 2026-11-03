@@ -8,7 +8,7 @@ const lockGraceMs = 10000;
 const parentVariable = "CODEMEMORY_LAUNCH_PARENT";
 
 /** An update lock blocks launches only while its owner is alive (or is still being written). */
-function updateLockMessage(path: string) {
+export function updateLockMessage(path: string) {
   let content: string;
   try {
     content = readFileSync(path, "utf8");
@@ -23,7 +23,15 @@ function updateLockMessage(path: string) {
     pid = undefined;
   }
   if (typeof pid !== "number" || !Number.isInteger(pid) || pid < 1) {
-    if (Date.now() - statSync(path).mtimeMs > lockGraceMs) return null;
+    let mtimeMs: number;
+    try {
+      mtimeMs = statSync(path).mtimeMs;
+    } catch (e) {
+      // Removed after the read: no update holds the lock any more.
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw e;
+    }
+    if (Date.now() - mtimeMs > lockGraceMs) return null;
     return "CodeMemory update lock is being written. Reconnect in a few seconds.";
   }
   try {
