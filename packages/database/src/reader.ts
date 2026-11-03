@@ -8,6 +8,17 @@ import {
 import type pg from "pg";
 
 const literalPattern = (text: string) => text.replace(/[\\%_]/g, "\\$&");
+/** Rechecking a trigram candidate decompresses and lowercases a whole matching file; walking
+ * a path window does that only for files that match. Measured ratio on two real projects. */
+const RECHECK_COST = 3;
+type CodeWindow = {
+  rows: Record<string, unknown>[];
+  files: number;
+  last: string | null;
+  matched: number;
+  matchedFiles: number;
+  filesLeft: number;
+};
 const pageResult = <T>(rows: T[], page: PageRequest) => ({
   results: rows.slice(0, page.limit),
   hasMore: rows.length > page.limit,
@@ -94,23 +105,100 @@ export class PostgresIndexReader implements IndexReader {
       page,
     );
   }
-  /** One statement: with files_path_c (migration 10) the planner walks matching files in
-   * path order and stops at LIMIT. Measured on kiosk-software-last (5,660 files) this beat
-   * a batched cursor variant on every query, e.g. "create" 2 ms vs 94 ms. */
+  /**
+   * Matching lines in path order. The planner cannot estimate substring selectivity in file
+   * content, so it alternately walked every file for a rare term or decompressed every
+   * trigram candidate for a common one (about 0.4 s and 1 s on a 5,660-file project). The
+   * order of access is chosen here instead: walk growing path windows while matches are
+   * dense, and switch to the project's trigram candidates (migration 15) once the density
+   * seen so far makes rechecking the estimated candidates cheaper than walking on. Both
+   * stages read files in path order, so pages equal one ordered statement.
+   */
   async searchCode(query: string, page: PageRequest) {
     this.checkPage(page);
     const pattern = `%${literalPattern(query.toLowerCase())}%`;
-    const rows = await this.query(
+    const results: Record<string, unknown>[] = [];
+    let skip = page.offset,
+      want = page.limit + 1,
+      after: string | null = null;
+    const take = (window: CodeWindow) => {
+      results.push(...window.rows);
+      want -= window.rows.length;
+      skip = Math.max(0, skip - window.matched);
+    };
+    for (let size = 200; ; size *= 2) {
+      const needed = skip + want;
+      const window = await this.codeWindow(pattern, needed, skip, { after, size });
+      take(window);
+      if (want <= 0 || !window.filesLeft) return pageResult(results, page);
+      after = window.last;
+      const walk = window.matched
+        ? ((needed - window.matched) * window.files) / window.matched
+        : window.filesLeft;
+      const recheck = (RECHECK_COST * window.matchedFiles * window.filesLeft) / window.files;
+      if (recheck < walk) break;
+    }
+    const candidates = (
+      await this.query<{ id: string }>(
+        `WITH c AS MATERIALIZED (
+           SELECT id, path, COALESCE(file_status, data->>'status') AS status FROM files
+           WHERE repository_id=$1 AND lower(data->>'content') LIKE $2)
+         SELECT id FROM c WHERE status='INDEXED' AND path COLLATE "C" > $3 ORDER BY path COLLATE "C"`,
+        [pattern, after],
+      )
+    ).map((r) => r.id);
+    for (let start = 0, batch = Math.max(16, want); start < candidates.length && want > 0; ) {
+      const ids = candidates.slice(start, start + batch);
+      take(await this.codeWindow(pattern, skip + want, skip, { ids }));
+      start += ids.length;
+      batch = Math.min(batch * 2, 1024);
+    }
+    return pageResult(results, page);
+  }
+  /** Matching lines of one path window (or listed files): up to `limit` lines from the
+   * window start, returned after `offset`; `matched` counts them before the offset. */
+  private async codeWindow(
+    pattern: string,
+    limit: number,
+    offset: number,
+    source: { after: string | null; size: number } | { ids: string[] },
+  ): Promise<CodeWindow> {
+    const byPath = "size" in source;
+    const rows = await this.query<Record<string, unknown>>(
       `
-      SELECT f.path AS file, l.ordinality::int AS line, left(l.text,500) AS snippet,
-             CASE WHEN f.data->>'generated'='true' THEN 0.5 ELSE 1 END::float8 AS score, 'lexical substring' AS reason
-      FROM files f CROSS JOIN LATERAL regexp_split_to_table(f.data->>'content', E'\\r?\\n') WITH ORDINALITY AS l(text,ordinality)
-      WHERE f.repository_id=$1 AND f.data->>'status'='INDEXED'
-        AND lower(f.data->>'content') LIKE $2 AND lower(l.text) LIKE $2
-      ORDER BY f.path COLLATE "C", l.ordinality LIMIT $3 OFFSET $4`,
-      [pattern, page.limit + 1, page.offset],
+      WITH w AS MATERIALIZED (
+        SELECT path, data, generated FROM files WHERE repository_id=$1 AND data->>'status'='INDEXED' AND ${
+          byPath
+            ? `($5::text IS NULL OR path COLLATE "C" > $5) ORDER BY path COLLATE "C" LIMIT $6`
+            : "id=ANY($5::text[])"
+        }),
+      m AS MATERIALIZED (
+        SELECT f.path, l.ordinality, l.text, COALESCE(f.generated, (f.data->>'generated')='true') AS generated
+        FROM w f CROSS JOIN LATERAL regexp_split_to_table(f.data->>'content', E'\\r?\\n') WITH ORDINALITY AS l(text,ordinality)
+        WHERE lower(f.data->>'content') LIKE $2 AND lower(l.text) LIKE $2
+        ORDER BY f.path COLLATE "C", l.ordinality LIMIT $3),
+      last AS (SELECT max(path COLLATE "C") AS path FROM w)
+      SELECT * FROM (SELECT * FROM (
+        SELECT path AS file, ordinality::int AS line, left(text,500) AS snippet,
+               CASE WHEN generated THEN 0.5 ELSE 1 END::float8 AS score, 'lexical substring' AS reason
+        FROM m ORDER BY path COLLATE "C", ordinality OFFSET $4) page
+      UNION ALL
+      SELECT NULL, NULL, NULL, NULL, json_build_object(
+        'files', (SELECT count(*) FROM w), 'last', (SELECT path FROM last),
+        'matched', (SELECT count(*) FROM m), 'matchedFiles', (SELECT count(DISTINCT path) FROM m),
+        'filesLeft', ${
+          byPath
+            ? `(SELECT count(*) FROM files WHERE repository_id=$1 AND data->>'status'='INDEXED'
+                 AND path COLLATE "C" > (SELECT path FROM last))`
+            : "0"
+        })::text) u
+      ORDER BY file COLLATE "C" NULLS LAST, line`,
+      byPath
+        ? [pattern, limit, offset, source.after, source.size]
+        : [pattern, limit, offset, source.ids],
     );
-    return pageResult(rows, page);
+    const marker = JSON.parse(String(rows.pop()?.reason)) as Omit<CodeWindow, "rows">;
+    return { rows, ...marker };
   }
   async symbol(selector: SymbolSelector) {
     const symbol = await this.resolve(selector);

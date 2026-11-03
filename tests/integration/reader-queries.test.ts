@@ -160,7 +160,7 @@ describe("search_code streaming", () => {
         "  return value;",
         i % 4 === 0 ? `  CreateThing(${i}); createAgain();` : "  noop();",
         i % 97 === 0 ? `const long = "create${"x".repeat(700)}";` : "",
-        i % 500 === 0 ? "literal zebra_%x marker" : "",
+        i % 500 === 0 ? "literal zebra_%x marker" : i % 61 === 0 ? "sparse_marker()" : "",
         // A lone CR does not end a line: "create\r" then matches LF files line by line,
         // while CRLF files match only as whole content and contribute no lines.
         i % 3 === 0 ? "lone create" : "lone create\rafter",
@@ -194,6 +194,9 @@ describe("search_code streaming", () => {
       ["absent-term", 20, 0],
       ["create\r", 20, 1500],
       ["\r", 50, 2500],
+      ["sparse_marker", 20, 0],
+      ["sparse_marker", 7, 30],
+      ["zebra_%x", 2, 3],
     ];
     for (const [query, limit, offset] of cases) {
       const actual = await reader("code").searchCode(query, { limit, offset });
@@ -204,6 +207,29 @@ describe("search_code streaming", () => {
     const first = await reader("code").searchCode("create", { limit: 20, offset: 0 });
     expect(first.results).toHaveLength(20);
     expect(first.hasMore).toBe(true);
+  });
+
+  it("pages sparse terms from trigram candidates and dense terms from path windows", async () => {
+    const statements: string[] = [];
+    const query = client.query.bind(client);
+    const spy = vi.spyOn(client, "query").mockImplementation(((sql: string, params?: unknown[]) => {
+      statements.push(sql);
+      return query(sql, params);
+    }) as typeof client.query);
+    try {
+      const candidates = () => statements.filter((sql) => sql.includes("WITH c AS")).length;
+      // Present in about 1 of 61 files: two path windows are too sparse to fill 26 rows.
+      const sparse = await reader("code").searchCode("sparse_marker", { limit: 25, offset: 0 });
+      expect(candidates()).toBe(1);
+      expect(sparse).toEqual(await legacySearchCode("code", "sparse_marker", 25, 0));
+      statements.length = 0;
+      const dense = await reader("code").searchCode("create", { limit: 20, offset: 0 });
+      expect(candidates()).toBe(0);
+      expect(statements).toHaveLength(1);
+      expect(dense.results).toHaveLength(20);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("keeps CRLF numbering, a final line without newline and 500-character snippets", async () => {
