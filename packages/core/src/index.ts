@@ -122,6 +122,8 @@ export interface Snapshot extends Analysis {
 export interface IndexState {
   files: Pick<IndexedFile, "path" | "hash" | "status">[];
   version: number;
+  /** Highest version published before the last `clean`; the next version continues above it. */
+  versionFloor?: number;
   fingerprint: string;
   indexedAt: string | null;
 }

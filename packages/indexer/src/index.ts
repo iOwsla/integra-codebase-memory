@@ -99,7 +99,7 @@ export class IndexService {
         const analysis = await this.plugin.analyze(this.context, scan.files, scan.configs);
         const indexedAt = new Date().toISOString();
         const result = {
-          version: old.version + 1,
+          version: Math.max(old.version, old.versionFloor ?? 0) + 1,
           changed: changed.length,
           deleted: deleted.length,
           excluded: scan.excluded,

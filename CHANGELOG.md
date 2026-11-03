@@ -4,6 +4,15 @@
 
 - Record the receiver's static class/interface on call edges (`receiverType`) and keep a `find_callers` dispatch row only when that type is an ancestor of the queried member. Calls on a sibling subclass that inherits the base member are no longer reported as possible callers of an override. The analyzer version changes, so existing indexes re-analyze once.
 - evaluate-project: exclude `this` keyword matches and inherited-member calls on sibling receivers from the language-service oracle.
+- Incremental publication sends, upserts and deletes symbols only for files whose analysis changed, instead of every symbol in the project, and no longer forces a synchronous full GC every 50,000 rows. `CODEMEMORY_PROFILE=1` reports a `digest` phase.
+- A configuration-only change (for example `package.json`) no longer rewrites file rows whose stored data is unchanged.
+- Duplicate unresolved-reference ids in one analysis no longer abort publication; the first row is kept.
+- A dropped PostgreSQL connection during a query, memory search or memory save now rejects that call instead of crashing the process.
+- Migration 10 drops the unused `symbols_fuzzy` and `edges_type` indexes, adds nullable `hash`, `file_status` and `analysis_hash` columns to `files` so scans and publication no longer read file content, adds `files_path_c` and adds `repositories.version_floor`. The columns are a catalog-only change, not a table rewrite; publication writes them, existing rows are backfilled in 500-row batches after the migration commits, and readers fall back to the stored JSON until then. Migrations run without the 30 s statement budget and fail after a 30 s lock wait instead of blocking readers. Run `codememory update` (or setup) to migrate before using this release.
+- A RUNNING index job whose owner no longer holds the project lock is reported as interrupted with `freshness: LAST_COMPLETED` in `status` and query metadata, not UPDATING.
+- Publication keeps the latest 20 index runs per project; recording a failure prunes index errors older than 30 days.
+- `clean` and `remove` delete set-wise under a 10-minute statement budget so large projects no longer hit the 30 s timeout. `clean` also deletes run history and the last index job, and later index versions continue above the pre-clean version.
+- `debug unresolved` reads only the first 100 unresolved references by id and prints `{ total, results }` instead of loading the whole project snapshot.
 
 ## 0.1.0-alpha.34 — 2026-11-03
 

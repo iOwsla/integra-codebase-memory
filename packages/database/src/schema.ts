@@ -125,4 +125,18 @@ FOREIGN KEY(repository_id,worktree_id) REFERENCES history_worktrees(repository_i
 DROP INDEX IF EXISTS edges_out;`,
   `CREATE INDEX edges_file ON symbol_edges(repository_id,file_id);
 CREATE INDEX unresolved_file ON unresolved_references(repository_id,(data->>'fileId'));`,
+  // No query reads bare-name trigrams or filters edges by type without an anchor id; both
+  // indexes only cost publish writes. Metadata columns let scans and publishes compare hashes
+  // without detoasting each file's content. They are plain nullable columns, not STORED
+  // generated ones: adding them is a catalog-only change, whereas a generated column rewrites
+  // the whole files table and rebuilds its indexes (including the content trigram index).
+  // Publication writes them; PostgresStore.migrate backfills existing rows in batches after
+  // this transaction, and readers fall back to the jsonb field while a column is NULL.
+  // version_floor keeps index versions monotonic across `clean`, which resets version to 0.
+  `DROP INDEX IF EXISTS symbols_fuzzy;
+DROP INDEX IF EXISTS edges_type;
+ALTER TABLE files ADD COLUMN hash text, ADD COLUMN file_status text, ADD COLUMN analysis_hash text;
+CREATE INDEX files_metadata_pending ON files(repository_id,id) WHERE file_status IS NULL;
+CREATE INDEX files_path_c ON files(repository_id,(path COLLATE "C")) WHERE data->>'status'='INDEXED';
+ALTER TABLE repositories ADD COLUMN version_floor integer NOT NULL DEFAULT 0;`,
 ];

@@ -7,6 +7,7 @@ import { TypeScriptPlugin } from "@codememory/plugin-typescript";
 import { createProjectContext } from "@codememory/shared";
 import { fixture, testDatabase } from "@codememory/test-utils";
 import { expect, it, vi } from "vitest";
+import { migrations } from "../../packages/database/src/schema";
 
 async function indexed(files: Record<string, string>) {
   const db = await testDatabase(),
@@ -239,17 +240,9 @@ it("upgrades migration 1 without rewriting indexed data and applies migration 2 
     expect(
       (await t.db.store.pool.query("SELECT id,xmin::text FROM symbols ORDER BY id")).rows,
     ).toEqual(before.rows);
-    expect((await t.db.store.diagnostics()).migrations).toEqual([
-      { version: 1 },
-      { version: 2 },
-      { version: 3 },
-      { version: 4 },
-      { version: 5 },
-      { version: 6 },
-      { version: 7 },
-      { version: 8 },
-      { version: 9 },
-    ]);
+    expect((await t.db.store.diagnostics()).migrations).toEqual(
+      migrations.map((_, index) => ({ version: index + 1 })),
+    );
     expect((await t.service.execute("search_symbols", { query: "kept" })).results).toHaveLength(1);
   } finally {
     await t.dispose();
