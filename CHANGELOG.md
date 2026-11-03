@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Requeue a memory workflow job when the worker stops mid-inference (Ctrl+C or an MCP client disconnect) instead of marking it FAILED with `MEMORY_CANCELLED`; the interrupted run no longer counts toward the three-attempt retry limit.
+
 ## 0.1.0-alpha.34 — 2026-11-03
 
 - Load TypeScript standard-library declarations (`lib.d.ts` and `lib.*.d.ts`) from CodeMemory's own TypeScript package during analysis. Member calls through `Record`, `Promise` and other built-in generics now resolve instead of being recorded as unresolved; library declarations are never indexed. The analyzer version changes, so existing indexes re-analyze once.
