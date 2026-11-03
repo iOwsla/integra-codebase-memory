@@ -114,7 +114,7 @@ export function createMcpServer(
     return { selected, args };
   };
   const server = new McpServer(
-    { name: "codememory", version: "0.1.0-alpha.34" },
+    { name: "codememory", version: "0.1.0-alpha.35" },
     {
       instructions:
         (multi
