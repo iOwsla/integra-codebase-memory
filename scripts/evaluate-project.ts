@@ -332,7 +332,9 @@ try {
     indexWaitMs = performance.now() - waited;
   }
   if (status.projectRoot !== root || status.state !== "READY")
-    throw new Error(`Index not ready for ${root}: ${status.state}`);
+    throw new Error(
+      `Index not ready for ${root}: ${status.state} ${JSON.stringify({ error: status.error, message: status.message, lastIndexJob: status.lastIndexJob })}`,
+    );
 
   const oracleFiles = new Set(program.getSourceFiles().map((sf) => rel(sf.fileName)));
   const items: Record<string, unknown>[] = [];
