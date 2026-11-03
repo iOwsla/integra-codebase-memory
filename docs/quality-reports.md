@@ -2,7 +2,8 @@
 
 Reindex with alpha.12 or newer (parser revision 5) before querying these reports.
 Old generations lack body fingerprints. Inspect `codebase_status`, generation,
-pending changes, incomplete coverage and each report's unresolved-reference count.
+pending changes, incomplete coverage and each report's unresolved-reference count
+(the total recorded with the latest published index run, the same value status reports).
 No result is proof of absence. Results are repository-scoped SQL queries, with
 limit 1–100 (default 20), offset pagination and the existing statement timeout.
 

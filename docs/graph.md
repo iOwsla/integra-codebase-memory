@@ -6,11 +6,18 @@ A symbol has a deterministic repository-root/file/kind/qualified-name identity. 
 
 `find_callers` on an instance member also returns calls whose static receiver type is an interface or base class the member implements or overrides. The owning class's `IMPLEMENTS`/`EXTENDS` ancestors are followed up to depth 10 and matched by member name. Those rows carry `dispatch.via` with the supertype member; the runtime target may be another implementation, so treat them as possible callers. Constructors and static members never dispatch and return only their direct callers. `super.member()` calls are stored with edge metadata `receiver: "super"` and are listed only as direct callers of the base member. Other member calls record `receiverType`, the indexed class or interface of the receiver's static type; a dispatch row is kept only when that type is one of the member's ancestors, so a sibling subclass that merely inherits the base member is not reported. Union, intersection and external receiver types stay unrecorded and remain possible callers. Stored edges keep their target: the call still targets the supertype member, and `trace_dependencies` does not add dispatch hops.
 
+`get_symbol` returns raw `incoming`/`outgoing` edge counts plus
+`incomingByType`/`outgoingByType` per edge type. Raw counts include structural
+`DECLARES` and `EXPORTS` edges; `usageIncoming` excludes them and self-edges, so
+a declared but unused symbol reports `usageIncoming: 0`.
+
 Relationship pages join only scoped neighboring symbols in SQL. Traversal uses
-cached, directed SQL adjacency reads rather than loading every edge. It returns
+cached, directed SQL adjacency reads rather than loading every edge; the
+neighbors of all uncached nodes in the current breadth-first level load in one
+statement. It returns
 ID paths, deduplicates repeated call sites to the same neighbor and prevents
 revisiting a symbol within a path. Requested depth is at most 10 and paths at
-most 100. Internal bounds are 128 adjacency queries, 1,000 neighbors per query,
+most 100. Internal bounds are 128 expanded nodes, 1,000 neighbors per node,
 10,000 fetched neighbors, 1,000 queued paths, 10,000 expansion steps and a
 five-second loop budget (checked between SQL calls). A statement itself has a
 five-second timeout. Exhausted internal bounds or unreturned queued paths set
