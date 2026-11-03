@@ -1,7 +1,18 @@
 import { once } from "node:events";
+import { Worker } from "node:worker_threads";
 import type { IndexedFile, ProjectContext } from "@codememory/core";
 import { TypeScriptPlugin } from "./index";
 
+// stdin is consumed in full up front, so its end cannot signal parent death. Poll the
+// parent pid instead: once the parent dies the worker is re-parented and must stop.
+// Analysis is synchronous, so the poll runs on its own thread to fire while it is busy.
+new Worker(
+  `const { workerData } = require("node:worker_threads");
+  setInterval(() => {
+    if (process.ppid !== workerData) process.kill(process.pid, "SIGKILL");
+  }, 1000);`,
+  { eval: true, workerData: process.ppid },
+).unref();
 const input = JSON.parse(await Bun.stdin.text()) as {
   context: ProjectContext;
   files: IndexedFile[];

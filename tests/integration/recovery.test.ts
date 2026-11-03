@@ -73,7 +73,7 @@ it("records parser failure stages, preserves completed generation and recovers o
           interrupted: false,
         });
         if (fail) throw new Error("simulated parser crash");
-        return parser.analyze(...args);
+        return parser.analyze(args[0], args[1], args[2]);
       },
     };
     const index = new IndexService(c, db.store, new RepositoryScanner(), plugin);
@@ -155,7 +155,7 @@ it("survives loss of the lock-owning connection during analysis and releases its
           await db.store.pool.query("SELECT pg_terminate_backend($1)", [rows[0].backend_pid]);
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
-        return parser.analyze(...args);
+        return parser.analyze(args[0], args[1], args[2]);
       },
     };
     const index = new IndexService(c, db.store, new RepositoryScanner(), plugin);

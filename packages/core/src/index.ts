@@ -107,7 +107,7 @@ export interface Analysis {
   diagnostics: {
     file: string;
     message: string;
-    kind?: "SYNTAX_ERROR" | "CONFIGURATION";
+    kind?: "SYNTAX_ERROR" | "CONFIGURATION" | "ANALYSIS_ERROR";
     line?: number;
     column?: number;
     code?: number;
@@ -269,10 +269,12 @@ export interface LanguagePlugin {
   readonly id: string;
   readonly version: string;
   readonly extensions: readonly string[];
+  /** Implementations should stop work and reject with INDEX_CANCELLED once `signal` aborts. */
   analyze(
     context: ProjectContext,
     files: IndexedFile[],
     configs: Map<string, string>,
+    signal?: AbortSignal,
   ): Promise<Analysis>;
 }
 export interface FrameworkPlugin {

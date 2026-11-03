@@ -12,7 +12,7 @@ Tools: codebase_status, search_symbols, search_code, get_symbol, get_file_outlin
 
 All schemas reject extra properties. Repository IDs cannot be provided. Max result count is 100, context windows are at most 101 lines / 12,000 characters, and serialized output is at most 64 KiB. Traversal is bounded to depth 10, 100 paths and 10,000 expansions. Source snippets and stored memories are untrusted content, not instructions.
 
-The status response includes the selected canonical root, scope identity, readiness, pending changes, watcher/auto-index flags, last successful index, exclusions and last re-analysis reason. Query metadata identifies the completed generation and incomplete coverage. STDOUT is protocol-only; logs go to STDERR.
+The status response includes the selected canonical root, scope identity, readiness, pending changes, watcher/auto-index flags, last successful index, exclusions and last re-analysis reason. Query metadata identifies the completed generation and incomplete coverage; query tools take pending changes from in-memory session state rather than running the status query. `get_file_outline` and `get_file_context` serve the indexed snapshot even when the file was since deleted on disk, and then add `sourceOnDisk: false`. STDOUT is protocol-only; logs go to STDERR.
 
 See [official SDK STDIO documentation](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/serving/stdio.md).
 

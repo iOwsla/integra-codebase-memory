@@ -24,7 +24,7 @@ it("converges across repeated watcher bursts, parser failures and offline edits 
     extensions: parser.extensions,
     analyze: (...args) => {
       if (fail) throw new Error("injected endurance failure");
-      return parser.analyze(...args);
+      return parser.analyze(args[0], args[1], args[2]);
     },
   };
   const open = () =>
@@ -128,7 +128,7 @@ it("retains changes queued while a previous generation is still analyzing", asyn
         entered = true;
         await gate;
       }
-      return parser.analyze(...args);
+      return parser.analyze(args[0], args[1], args[2]);
     },
   };
   const index = new IndexService(c, db.store, new RepositoryScanner(), plugin);

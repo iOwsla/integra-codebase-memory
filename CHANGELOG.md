@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Cancel a running index when a session closes: the parser worker is killed, nothing is published, and MCP shutdown waits at most 10 seconds. A parser worker whose parent dies now exits within about a second.
+- Back off retries of a failing index exponentially (from `reconcileMs` up to one hour, reported as `retryAfterMs`) instead of re-analyzing unchanged input on every reconcile; a file change retries immediately.
+- Keep watcher failures visible in `codebase_status` (`watcher: false`, `watchError`) after later successful indexes, reconcile at once, and re-arm the macOS native watcher with backoff.
+- Stop reporting an interrupted index job (RUNNING without its lock) as UPDATING in session status.
+- Serve query freshness from in-memory session state instead of running the full status query before every tool call.
+- Exclude `.gitignore` and `.codememoryignore` text from the index fingerprint so editing them no longer marks every file changed. Projects with ignore files re-analyze once after upgrading.
+- Serve `get_file_outline` and `get_file_context` from the indexed snapshot for files deleted on disk, marked `sourceOnDisk: false`.
+- Include the sanitized tail of parser worker stderr in the error when the worker crashes.
+- Isolate background memory worker failures per project and log their error codes with the project scope.
+
 ## 0.1.0-alpha.34 — 2026-11-03
 
 - Load TypeScript standard-library declarations (`lib.d.ts` and `lib.*.d.ts`) from CodeMemory's own TypeScript package during analysis. Member calls through `Record`, `Promise` and other built-in generics now resolve instead of being recorded as unresolved; library declarations are never indexed. The analyzer version changes, so existing indexes re-analyze once.

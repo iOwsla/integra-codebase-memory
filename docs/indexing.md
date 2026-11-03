@@ -2,13 +2,13 @@
 
 Discovery prunes excluded trees before reading. Source files are bounded to 2 MiB by default, checked for NUL bytes, hashed with SHA-256 and tagged for generated code. The TypeScript plugin analyzes accepted files using a bounded compiler input map, configured workspace mounts and in-scope reference redirects. See parser.md for configuration ownership and declaration-output mapping. Unresolved references are persisted separately.
 
-The index fingerprint combines parser version, schema compatibility, source-selection config and in-scope tsconfig/package/gitignore text. Reconciliation first reads a compact file hash/status manifest, without loading the graph. A no-op reopen skips all parser and graph writes; operational progress metadata is updated. Otherwise the selected project is conservatively re-analyzed for dependency correctness. Publication hashes each file's semantic records and replaces only relationships whose file hash changed; cross-file effects are included when their semantic records change. File changes and deletion cleanup publish atomically with graph data and an index-run record. Parser diagnostics are returned as incomplete coverage; fatal failures retain the previous graph.
+The index fingerprint combines parser version, schema compatibility, source-selection config and in-scope tsconfig/package text. `.gitignore` and `.codememoryignore` text is not part of the fingerprint: their effect already appears as added or deleted paths, so a comment or rule edit re-analyzes only when the selected file set changes. Reconciliation first reads a compact file hash/status manifest, without loading the graph. A no-op reopen skips all parser and graph writes; operational progress metadata is updated. Otherwise the selected project is conservatively re-analyzed for dependency correctness. Publication hashes each file's semantic records and replaces only relationships whose file hash changed; cross-file effects are included when their semantic records change. File changes and deletion cleanup publish atomically with graph data and an index-run record. Parser diagnostics are returned as incomplete coverage; fatal failures retain the previous graph.
 
 Configuration lives in `.codememory/config.json`. `init` writes documented defaults without replacing an existing config. Supported keys: `maxFileSizeBytes`, `parserTimeoutMs`, `parserOutputLimitMiB`, `include`, `exclude`, `excludeGenerated`, `debounceMs`, `reconcileMs`. Unknown keys fail validation. Restart the process after config changes.
 
 The watcher reacts to filesystem events after the 300 ms debounce. Its fallback reconciliation scan defaults to every five minutes, reducing idle disk and CPU work in large repositories. A change to `debounceMs`, `reconcileMs` or parser timeout/output limits does not change source analysis and therefore does not invalidate the graph fingerprint. Source selection or parser changes still trigger a full safe reanalysis.
 
-On macOS, the watcher uses the native recursive filesystem subscription and applies the project's exclusion rules to received paths. This avoids a synchronous directory crawl when the MCP connection opens. Other platforms use Chokidar with cached ignore rules. Coalesced or nameless events still trigger a project reconciliation scan; the periodic scan covers missed events.
+On macOS, the watcher uses the native recursive filesystem subscription and applies the project's exclusion rules to received paths. This avoids a synchronous directory crawl when the MCP connection opens. Other platforms use Chokidar with cached ignore rules. Coalesced or nameless events still trigger a project reconciliation scan; the periodic scan covers missed events. A watcher error is reported in status as `watcher: false` with `watchError` until the watcher delivers events again, and triggers an immediate reconciliation; on macOS the native watcher is re-armed with backoff from 1 to 60 seconds. A failed index is retried by reconciliation with exponential backoff (starting at `reconcileMs`, capped at one hour, reported as `retryAfterMs`); a real file change retries immediately.
 
 Published file, symbol and relationship totals are recorded with each index run. Status requests read those totals instead of recounting large tables; older generations without saved totals use the original count queries until their next successful index.
 
@@ -60,9 +60,9 @@ are not loaded. For example:
 !src/business.report.mjs
 ```
 
-The policy applies to initial indexing, reindexing and watcher pruning. The file
-is included in the index configuration fingerprint, so editing or deleting it
-is picked up by the next scan. Removed index entries are reconciled; source files
+The policy applies to initial indexing, reindexing and watcher pruning. Editing
+or deleting it is picked up by the next scan through the resulting added or
+deleted paths; it is not part of the index configuration fingerprint. Removed index entries are reconciled; source files
 remain on disk. Exclusions are reported as `CODEMEMORYIGNORE` and do not themselves
 make coverage incomplete. The ignore file is read only when at most 64 KiB.
 
