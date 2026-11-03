@@ -51,7 +51,7 @@ const rel = (file: string) => relative(root, file).split("\\").join("/");
 type Ref = {
   file: string;
   line: number;
-  kind: "import" | "decl" | "call" | "new" | "use" | "sibling";
+  kind: "import" | "decl" | "call" | "new" | "use" | "sibling" | "this";
 };
 type Candidate = {
   name: string;
@@ -163,6 +163,8 @@ for (const [, group] of byKind) {
 }
 
 function classify(node: TS.Node): Ref["kind"] {
+  // Class searches also return `this` keywords inside the class; they are not name uses.
+  if (node.kind === ts.SyntaxKind.ThisKeyword) return "this";
   for (let n: TS.Node = node; n; n = n.parent)
     if (ts.isImportDeclaration(n) || ts.isExportDeclaration(n) || ts.isImportEqualsDeclaration(n))
       return "import";
@@ -235,6 +237,21 @@ function oracleRefs(c: Candidate): Ref[] {
           !declarations.some((d) => d === targetNode || (d.parent && ancestors.has(d.parent)))
         )
           kind = "sibling";
+        // A call resolved to an inherited ancestor member reaches this override only
+        // when the receiver's static type is in the target's own hierarchy.
+        else if (
+          !declarations.includes(targetNode as TS.Declaration) &&
+          ts.isPropertyAccessExpression(node.parent) &&
+          node.parent.name === node
+        ) {
+          const receiver = checker.getTypeAtLocation(node.parent.expression);
+          const owners = receiver.isUnionOrIntersection()
+            ? []
+            : (receiver.getSymbol()?.declarations ?? []).filter(
+                (d) => ts.isClassLike(d) || ts.isInterfaceDeclaration(d),
+              );
+          if (owners.length && !owners.some((d) => ancestors.has(d))) kind = "sibling";
+        }
       }
       refs.push({
         file: rel(r.fileName),
@@ -315,7 +332,9 @@ try {
     indexWaitMs = performance.now() - waited;
   }
   if (status.projectRoot !== root || status.state !== "READY")
-    throw new Error(`Index not ready for ${root}: ${status.state}`);
+    throw new Error(
+      `Index not ready for ${root}: ${status.state} ${JSON.stringify({ error: status.error, message: status.message, lastIndexJob: status.lastIndexJob })}`,
+    );
 
   const oracleFiles = new Set(program.getSourceFiles().map((sf) => rel(sf.fileName)));
   const items: Record<string, unknown>[] = [];
@@ -391,7 +410,9 @@ try {
     const news = new Set(oracle.filter((r) => r.kind === "new").map(key));
     const uses = new Set(oracle.filter((r) => r.kind === "use").map(key));
     const any = new Set([...calls, ...news, ...uses]);
-    const everything = new Set(oracle.filter((r) => r.kind !== "sibling").map(key));
+    const everything = new Set(
+      oracle.filter((r) => r.kind !== "sibling" && r.kind !== "this").map(key),
+    );
     totals.siblings += oracle.filter((r) => r.kind === "sibling").length;
     const hit = (s: Set<string>, by: Set<string>) => [...s].filter((x) => by.has(x));
     totals.call[0] += hit(calls, callers).length;

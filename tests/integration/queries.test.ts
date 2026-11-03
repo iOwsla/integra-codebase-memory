@@ -7,6 +7,7 @@ import { TypeScriptPlugin } from "@codememory/plugin-typescript";
 import { createProjectContext } from "@codememory/shared";
 import { fixture, testDatabase } from "@codememory/test-utils";
 import { expect, it, vi } from "vitest";
+import { migrations } from "../../packages/database/src/schema";
 
 async function indexed(files: Record<string, string>) {
   const db = await testDatabase(),
@@ -232,24 +233,16 @@ it("upgrades migration 1 without rewriting indexed data and applies migration 2 
   try {
     const before = await t.db.store.pool.query("SELECT id,xmin::text FROM symbols ORDER BY id");
     await t.db.store.pool.query(
-      "DROP INDEX symbols_name_lower,symbols_qualified_lower,files_content_lower,files_incomplete,index_runs_project_latest,edges_in_page,edges_out_page; DELETE FROM schema_migrations WHERE version=2",
+      "DROP INDEX IF EXISTS symbols_name_lower,symbols_qualified_lower,files_content_lower,files_incomplete,index_runs_project_latest,edges_in_page,edges_out_page; DELETE FROM schema_migrations WHERE version=2",
     );
     await t.db.store.migrate();
     await t.db.store.migrate();
     expect(
       (await t.db.store.pool.query("SELECT id,xmin::text FROM symbols ORDER BY id")).rows,
     ).toEqual(before.rows);
-    expect((await t.db.store.diagnostics()).migrations).toEqual([
-      { version: 1 },
-      { version: 2 },
-      { version: 3 },
-      { version: 4 },
-      { version: 5 },
-      { version: 6 },
-      { version: 7 },
-      { version: 8 },
-      { version: 9 },
-    ]);
+    expect((await t.db.store.diagnostics()).migrations).toEqual(
+      migrations.map((_, index) => ({ version: index + 1 })),
+    );
     expect((await t.service.execute("search_symbols", { query: "kept" })).results).toHaveLength(1);
   } finally {
     await t.dispose();
@@ -317,6 +310,15 @@ it("lists interface and base-class dispatch callers with their supertype member"
   try {
     await db.store.register(c);
     await new IndexService(c, db.store, new RepositoryScanner(), new TypeScriptPlugin()).index();
+    // An initial publication refreshes planner statistics for the relationship tables.
+    const { default: pg } = await import("pg");
+    const stats = new pg.Client({ connectionString: db.url });
+    await stats.connect();
+    const analyzed = await stats.query(
+      "SELECT relname FROM pg_stat_user_tables WHERE relname IN ('symbols','symbol_edges') AND last_analyze IS NOT NULL",
+    );
+    await stats.end();
+    expect(analyzed.rows.map((r) => r.relname).sort()).toEqual(["symbol_edges", "symbols"]);
     const service = new CodebaseService(c, db.store);
     const callers = async (name: string) =>
       (
@@ -338,11 +340,19 @@ it("lists interface and base-class dispatch callers with their supertype member"
       ["Service.viaUnion", 7, null],
       ["Service.viaPromise", 9, null],
     ]);
-    // super.run() is a direct base call, never a dispatch caller of the override.
-    expect(await callers("Sub.run")).toEqual([["Service.base", 11, "Base.run"]]);
+    // super.run() is a direct base call, never a dispatch caller of the override. A
+    // Sibling class receiver is not an ancestor of Sub, so the nominal heuristic omits
+    // it, although Sub is structurally assignable to the member-less Sibling; `this` in
+    // Base can be a Sub and stays.
+    expect(await callers("Sub.run")).toEqual([
+      ["Base.twice", 8, "Base.run"],
+      ["Service.base", 11, "Base.run"],
+    ]);
     expect(await callers("Base.run")).toEqual([
+      ["Base.twice", 8, null],
       ["Sub.run", 9, null],
       ["Service.base", 11, null],
+      ["Service.sibling", 14, null],
     ]);
     // Static members and constructors keep only their direct callers.
     expect(await callers("Static.run")).toEqual([["Service.staticCall", 10, null]]);
@@ -353,6 +363,19 @@ it("lists interface and base-class dispatch callers with their supertype member"
       ["Service.build", 13, null],
     ]);
     expect(await callers("CustomHandler.verify")).toHaveLength(3);
+    // Interface receivers are structural and never filtered: a Labeled value can hold a
+    // Widget, which implements only Named.
+    expect(await callers("Widget.name")).toEqual([["show", 16, "Named.name"]]);
+    const rows = (await service.execute("find_callers", { name: "Widget.name" })).results as {
+      dispatch?: { receiverType: string | null };
+    }[];
+    const labeled = (await service.execute("search_symbols", { query: "Labeled" })).results as {
+      id: string;
+      qualifiedName: string;
+    }[];
+    expect(rows[0]?.dispatch?.receiverType).toBe(
+      labeled.find((s) => s.qualifiedName === "Labeled")?.id,
+    );
   } finally {
     await db.dispose();
   }

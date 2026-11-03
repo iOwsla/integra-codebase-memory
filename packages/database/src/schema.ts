@@ -125,4 +125,65 @@ FOREIGN KEY(repository_id,worktree_id) REFERENCES history_worktrees(repository_i
 DROP INDEX IF EXISTS edges_out;`,
   `CREATE INDEX edges_file ON symbol_edges(repository_id,file_id);
 CREATE INDEX unresolved_file ON unresolved_references(repository_id,(data->>'fileId'));`,
+  // No query reads bare-name trigrams or filters edges by type without an anchor id; both
+  // indexes only cost publish writes. Metadata columns let scans and publishes compare hashes
+  // without detoasting each file's content. They are plain nullable columns, not STORED
+  // generated ones: adding them is a catalog-only change, whereas a generated column rewrites
+  // the whole files table and rebuilds its indexes (including the content trigram index).
+  // Publication writes them; PostgresStore.migrate backfills existing rows in batches after
+  // this transaction, and readers fall back to the jsonb field while a column is NULL.
+  // version_floor keeps index versions monotonic across `clean`, which resets version to 0.
+  `DROP INDEX IF EXISTS symbols_fuzzy;
+DROP INDEX IF EXISTS edges_type;
+ALTER TABLE files ADD COLUMN hash text, ADD COLUMN file_status text, ADD COLUMN analysis_hash text;
+CREATE INDEX files_metadata_pending ON files(repository_id,id) WHERE file_status IS NULL;
+CREATE INDEX files_path_c ON files(repository_id,(path COLLATE "C")) WHERE data->>'status'='INDEXED';
+ALTER TABLE repositories ADD COLUMN version_floor integer NOT NULL DEFAULT 0;`,
+  // Edge rows carry two per-row foreign-key checks and a random-key primary key that no
+  // query reads; on 1.6M-edge projects they made publication 2.3-2.5x slower and doubled
+  // WAL. Publication deletes edges of removed symbols itself, clean deletes edges first,
+  // and the analyzer deduplicates edge ids, so integrity no longer depends on them.
+  `DO $$
+DECLARE c record;
+BEGIN
+  FOR c IN SELECT conname FROM pg_constraint
+    WHERE conrelid='symbol_edges'::regclass AND contype IN ('f','p')
+  LOOP
+    EXECUTE format('ALTER TABLE symbol_edges DROP CONSTRAINT %I', c.conname);
+  END LOOP;
+END $$;`,
+  // Readers prefer migration 10's metadata columns over data, but a release before them (or
+  // manual SQL) rewrites only data, leaving the columns stale for good. Deriving them from the
+  // incoming row on every data write works like a generated column without a table rewrite,
+  // and needs no OLD/NEW comparison (publication's NEW.data was just built in memory).
+  // PostgresStore.migrate repairs rows that drifted before this trigger existed.
+  `CREATE FUNCTION files_metadata_from_data() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.hash := NEW.data->>'hash';
+  NEW.file_status := NEW.data->>'status';
+  NEW.analysis_hash := NEW.data->>'analysisHash';
+  RETURN NEW;
+END $$;
+CREATE TRIGGER files_metadata_from_data BEFORE INSERT OR UPDATE OF data ON files
+  FOR EACH ROW EXECUTE FUNCTION files_metadata_from_data();`,
+  // Every query checks for non-INDEXED files. With no statistics on data->>'status' the
+  // planner skipped files_incomplete and detoasted every file's content (55 ms per call on
+  // a 5,660-file project). The real column has statistics, so this partial index is used.
+  `CREATE INDEX files_not_indexed ON files(repository_id) WHERE file_status<>'INDEXED';`,
+  // search_symbols and the quality reports read the generated flag for every candidate symbol;
+  // from data that decompresses the file's whole source once per symbol. The column keeps the
+  // jsonb comparison's semantics (NULL when the key is absent). Updating only this column does
+  // not fire the data trigger and reuses the TOAST pointers, so the backfill is cheap.
+  // files_incomplete has no reader since migration 13.
+  `ALTER TABLE files ADD COLUMN generated boolean;
+UPDATE files SET generated=(data->>'generated')='true';
+CREATE OR REPLACE FUNCTION files_metadata_from_data() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.hash := NEW.data->>'hash';
+  NEW.file_status := NEW.data->>'status';
+  NEW.analysis_hash := NEW.data->>'analysisHash';
+  NEW.generated := (NEW.data->>'generated')='true';
+  RETURN NEW;
+END $$;
+DROP INDEX IF EXISTS files_incomplete;`,
 ];

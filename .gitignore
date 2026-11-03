@@ -12,3 +12,6 @@ coverage/
 /.codex/config.toml
 /.mcp.json
 # integra-code-memory:local-config:end
+
+# Claude Code session worktrees
+/.claude/worktrees/

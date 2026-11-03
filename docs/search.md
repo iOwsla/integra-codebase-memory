@@ -12,13 +12,21 @@ Symbol ranking uses exact name (100), exact qualified name (95), name prefix
 0.3 (50 × similarity). Import/export aliases receive a 0.6 multiplier and
 generated files a 0.5 multiplier. This replaces the earlier JavaScript trigram
 approximation; fuzzy scores and candidate membership can change. Results carry
-their score and reason. Kind filters apply before paging.
+their score and reason. Kind filters apply before paging. Equal scores order
+non-test files before test paths (`__tests__/`, `test/`, `tests/`, `spec/`,
+`*.test.*`, `*.spec.*`), then classes and interfaces, then functions and
+methods, then other kinds, then file/line/ID. These tie-breakers do not change
+the score or reason.
 
 Code search is a case-insensitive literal substring search over indexed lines.
 `%`, `_` and backslashes are escaped, not treated as SQL patterns. It uses a
 content trigram index to select candidate files, then returns matching line
 numbers and snippets of at most 500 characters. It is not regex or token-based
-full-text search. Short/common queries can still scan many records server-side.
+full-text search. Matching files are read in path order in growing batches and
+only those batches are split into lines, stopping once the page is covered, so
+common terms no longer split every matching file. Each batch still filters all
+candidate files server-side, and the batches share a four-second budget that
+returns `QUERY_TIMEOUT` when exceeded.
 
 Paged reads fetch at most `limit + 1` rows, with `limit` 1–100 and `offset`
 0–100000. Ordering includes deterministic file/line/ID ties. `hasMore` describes

@@ -2,6 +2,7 @@ import { CodebaseService } from "@codememory/application";
 import { createProjectContext } from "@codememory/shared";
 import { fixture, testDatabase } from "@codememory/test-utils";
 import { expect, it } from "vitest";
+import { migrations } from "../../packages/database/src/schema";
 
 const historyTables = [
   "history_commits",
@@ -90,10 +91,12 @@ it("upgrades an alpha.28 database to migration 7 without rewriting existing proj
     await db.store.migrate();
     expect(await rows()).toEqual(before);
     expect((await db.store.diagnostics()).migrations).toEqual(
-      [1, 2, 3, 4, 5, 6, 7, 8, 9].map((version) => ({ version })),
+      migrations.map((_, index) => ({ version: index + 1 })),
     );
     expect(await historyTablesPresent()).toEqual(historyTables);
-    await expect(db.store.migrate(10)).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+    await expect(db.store.migrate(migrations.length + 1)).rejects.toMatchObject({
+      code: "INVALID_ARGUMENT",
+    });
     // Alpha.28 operations keep working against the upgraded schema.
     expect(
       (await app.memoryWorkflow.recall({ task: "refund", paths: ["src/refund.ts"] })).results[0],

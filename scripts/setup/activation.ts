@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { PostgresStore, requiredSchemaVersion } from "@codememory/database";
 import { newerRelease } from "@codememory/shared";
 import { installProject } from "../install-project";
 import { runtimeRoot } from "../runtime-root";
@@ -14,6 +15,7 @@ import {
   managementDirectory,
   type Registration,
   saveRegistration,
+  updateLock,
 } from "./cli-state";
 import {
   managedRuntimeRoots,
@@ -21,41 +23,67 @@ import {
   stopOwnedProcesses,
   verifiedRuntime,
 } from "./processes";
-import { checkLocalPath } from "./service-state";
+import { checkLocalPath, databaseUrl, readService } from "./service-state";
 
-export async function updateLock<T>(action: () => Promise<T>) {
-  const path = resolve(managementDirectory(), "update.lock");
-  await checkLocalPath(path);
-  await mkdir(managementDirectory(), { recursive: true, mode: 0o700 });
-  const token = JSON.stringify({ pid: process.pid, token: randomUUID() });
-  try {
-    await writeFile(path, token, { flag: "wx", mode: 0o600 });
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-    const previous = await readFile(path, "utf8");
-    const owner = JSON.parse(previous);
-    if (!Number.isInteger(owner.pid) || owner.pid < 1)
-      throw new Error("Invalid update lock; inspect local management state");
-    let alive = true;
+export { updateLock };
+
+/**
+ * Bring the databases of the activated projects to this runtime's schema before its pointer is
+ * published: the new runtime's indexing queries columns that recent migrations add. The managed
+ * database is migrated in place (never via setupServices, which recreates the container and
+ * cannot be rolled back). An external database is only checked, because activation must not
+ * migrate a database it does not own. Migrations 10-14 are forward-compatible with alpha.34
+ * (added nullable columns, dropped edge constraints that alpha.34 never relies on, a trigger
+ * that fills the new columns, a partial index, a generated-flag column), so an activation that fails afterwards and keeps the old
+ * runtime active on the new schema is safe.
+ */
+export async function migrateRuntimeDatabases(
+  projects: Registration[],
+  options: { managedUrl?: () => Promise<string>; externalUrl?: string } = {},
+) {
+  if (projects.some((p) => p.managed)) {
+    const store = new PostgresStore(
+      await (options.managedUrl ?? (async () => databaseUrl(await readService())))(),
+    );
     try {
-      process.kill(owner.pid, 0);
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ESRCH") alive = false;
+      await store.migrate();
+    } finally {
+      await store.close();
     }
-    if (alive) throw new Error("Another CodeMemory update is active; wait for it to finish");
-    if ((await readFile(path, "utf8")) !== previous) throw new Error("Update lock changed; retry");
-    await rm(path);
-    await writeFile(path, token, { flag: "wx", mode: 0o600 });
   }
+  if (!projects.some((p) => !p.managed)) return;
+  const store = new PostgresStore(options.externalUrl);
+  let version: number;
   try {
-    return await action();
+    version = await store.schemaVersion();
+  } catch {
+    // An unreachable external database cannot be checked here; the runtime reports
+    // SCHEMA_OUTDATED on its first index instead of a raw query error.
+    return "Could not check the external DATABASE_URL schema; if this release added migrations, run bun scripts/migrate.ts against it before indexing.";
   } finally {
-    if ((await readFile(path, "utf8").catch(() => "")) === token) await rm(path);
+    await store.close();
   }
+  // An empty database has no CodeMemory data the new runtime could misread; the runtime
+  // reports SCHEMA_OUTDATED until it is migrated, so other projects can still update.
+  if (version === 0)
+    return "The external DATABASE_URL has no CodeMemory schema yet; run bun scripts/migrate.ts against it before indexing.";
+  if (version < requiredSchemaVersion)
+    throw new Error(
+      `External database schema is at migration ${version}, this release needs ${requiredSchemaVersion}. Run bun scripts/migrate.ts with that DATABASE_URL (or codememory system setup for the managed service), then retry the update.`,
+    );
 }
 
-/** Prepare every project before stopping processes; publish the active pointer last. */
-export async function activateInstalledRuntime(selected?: Registration) {
+/**
+ * Prepare every project before stopping processes, then publish the active pointer and only
+ * afterwards retire older entries. An aborted signal rolls back at the next step boundary.
+ */
+export async function activateInstalledRuntime(
+  selected?: Registration,
+  options: { signal?: AbortSignal } = {},
+) {
+  const checkpoint = () => {
+    if (options.signal?.aborted) throw new Error("Activation interrupted");
+  };
   return updateLock(async () => {
     const registrations = await listRegistrations();
     if (selected) {
@@ -121,7 +149,9 @@ export async function activateInstalledRuntime(selected?: Registration) {
       plan.changedFiles.map((file) => resolve(project.root, file)),
     );
     paths.push(...bridges.map((bridge) => bridge.path));
+    const activePath = resolve(managementDirectory(), "active.json");
     paths.push(
+      activePath,
       ...[
         "launcher.ts",
         "mcp.ts",
@@ -153,9 +183,11 @@ export async function activateInstalledRuntime(selected?: Registration) {
       JSON.stringify({ beforeActive, files: snapshots }),
     );
     try {
+      checkpoint();
       await installManagementCli(false, onWrite);
       const results = [];
       for (const { project } of plans) {
+        checkpoint();
         const result = await installProject(
           project.root,
           project.client,
@@ -166,20 +198,31 @@ export async function activateInstalledRuntime(selected?: Registration) {
         );
         results.push(result);
       }
+      checkpoint();
+      // Repeat discovery after config writes to include a reconnect racing with the preflight.
+      const stopping = new Map(processes.map((p) => [p.pid, p]));
+      for (const candidate of await ownedProcesses(present.map((p) => p.root)))
+        stopping.set(candidate.pid, candidate);
+      const stopped = await stopOwnedProcesses([...stopping.values()]);
+      checkpoint();
+      // After the old sessions stopped, so none holds a lock the migration would wait on. A
+      // failure throws into the rollback below and keeps the previous pointer.
+      const databaseNote = await migrateRuntimeDatabases(present);
+      checkpoint();
+      await activatePointer(runtimeRoot);
+      onWrite(activePath, await readFile(activePath, "utf8"));
+      // Bridges follow the pointer: an interruption must never leave the active root forwarding
+      // back to the launcher, which would make every launch start itself again.
       for (const bridge of bridges) {
+        checkpoint();
         const expected = snapshots.find((item) => item.path === bridge.path);
         if ((await readFile(bridge.path, "utf8")) !== expected?.before)
           throw new Error("Legacy runtime changed during activation; retry");
         await atomic(bridge.path, bridge.content);
         onWrite(bridge.path, bridge.content);
       }
-      // Repeat discovery after config writes to include a reconnect racing with the preflight.
-      const stopping = new Map(processes.map((p) => [p.pid, p]));
-      for (const candidate of await ownedProcesses(present.map((p) => p.root)))
-        stopping.set(candidate.pid, candidate);
-      const stopped = await stopOwnedProcesses([...stopping.values()]);
+      checkpoint();
       if (selected) await saveRegistration(selected);
-      await activatePointer(runtimeRoot);
       return {
         activated: { format: 1, root: runtimeRoot, version: manifest.version },
         stoppedProcesses: stopped,
@@ -188,7 +231,7 @@ export async function activateInstalledRuntime(selected?: Registration) {
         skippedMissingProjects: skipped,
         skippedDisabledProjects: disabled,
         backupDirectory,
-        next: "Reconnect open MCP clients. Every shared project now starts the active runtime. No project was indexed by this update.",
+        next: `Reconnect open MCP clients. Every shared project now starts the active runtime.${present.some((p) => p.managed) ? " The managed database was migrated." : ""} No project was indexed by this update.${databaseNote ? ` ${databaseNote}` : ""}`,
       };
     } catch (error) {
       // Restore only our own completed writes, never overwrite a concurrent user edit.

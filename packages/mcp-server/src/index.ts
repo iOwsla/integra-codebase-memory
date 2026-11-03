@@ -9,6 +9,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 
+const SESSION_CLOSE_DEADLINE_MS = 10000;
 export function response(value: Record<string, unknown>, offset = 0) {
   let text = JSON.stringify(value);
   if (Buffer.byteLength(text) > 65536 && Array.isArray(value.results)) {
@@ -113,7 +114,7 @@ export function createMcpServer(
     return { selected, args };
   };
   const server = new McpServer(
-    { name: "codememory", version: "0.1.0-alpha.34" },
+    { name: "codememory", version: "0.1.0-alpha.35" },
     {
       instructions:
         (multi
@@ -292,12 +293,82 @@ export function createMcpServer(
   }
   return server;
 }
+/** One background tick. A failing project must not stop work for the projects after it. */
+export async function runBackgroundWork(
+  services: Pick<CodebaseService, "context" | "memoryWorkflow" | "history">[],
+  signal: AbortSignal,
+) {
+  for (const service of services) {
+    if (signal.aborted) break;
+    const projectScopeId = service.context.projectScopeId;
+    try {
+      await service.memoryWorkflow.workOnce(signal);
+    } catch (error) {
+      if (!signal.aborted)
+        log("error", "memory_worker_failed", { projectScopeId, error: publicError(error) });
+    }
+    try {
+      await service.history.workOnce(signal);
+    } catch (error) {
+      if (
+        !(
+          error instanceof CodeMemoryError &&
+          ["HISTORY_BUSY", "HISTORY_MODEL_BUSY"].includes(error.code)
+        )
+      )
+        log("error", "history_worker_failed", { projectScopeId, error: publicError(error) });
+    }
+  }
+}
 export async function runMcp(session: ProjectSession, store: ProjectStore) {
   return runMcpWorkspace([{ session, store }]);
+}
+/**
+ * Cancels every session at once and waits for in-flight work, session close, the transport and
+ * the stores under one deadline. Returns false when the deadline expired: stores whose session is
+ * still running (pool.end() waits for the locked publish connection) are closed without waiting.
+ */
+export async function closeWorkspace(
+  entries: { session: Pick<ProjectSession, "close">; store: Pick<ProjectStore, "close"> }[],
+  pending: Promise<unknown>[],
+  closeTransport: () => Promise<void>,
+  deadlineMs = SESSION_CLOSE_DEADLINE_MS,
+): Promise<boolean> {
+  // Session close aborts the index; start it before waiting for attach or background work.
+  const sessionsClosed = Promise.all(entries.map((e) => e.session.close()));
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  const closed = await Promise.race([
+    Promise.all([...pending, sessionsClosed]).then(() => true),
+    new Promise<false>((resolve) => {
+      deadline = setTimeout(() => resolve(false), deadlineMs);
+      deadline.unref();
+    }),
+  ]);
+  clearTimeout(deadline);
+  if (closed) {
+    await closeTransport();
+    await Promise.all(entries.map((e) => e.store.close()));
+    return true;
+  }
+  log("warn", "session_close_timeout", { timeoutMs: deadlineMs });
+  sessionsClosed.catch(() => {});
+  await closeTransport();
+  for (const e of entries)
+    void e.store.close().catch((error) => {
+      log("warn", "store_close_failed", { error: publicError(error) });
+    });
+  return false;
 }
 export async function runMcpWorkspace(
   entries: { session: ProjectSession; store: ProjectStore }[],
   openProject?: (root: string) => Promise<{ session: ProjectSession; store: ProjectStore }>,
+  options: {
+    /** Bound for the whole shutdown; afterwards the process is ended through onForcedExit. */
+    shutdownDeadlineMs?: number;
+    /** Called after a shutdown timeout. PostgreSQL rolls back an open publish and frees the
+     * advisory lock when the connection drops. Defaults to process.exit. */
+    onForcedExit?: (code: number) => void;
+  } = {},
 ) {
   const services = entries.map(
     ({ session, store }) => new CodebaseService(session.context, store, session),
@@ -308,24 +379,8 @@ export async function runMcpWorkspace(
   const workerTimer = setInterval(() => {
     if (workerBusy) return;
     workerBusy = true;
-    workerPending = (async () => {
-      for (const service of services) {
-        if (workerAbort.signal.aborted) break;
-        await service.memoryWorkflow.workOnce(workerAbort.signal);
-        try {
-          await service.history.workOnce(workerAbort.signal);
-        } catch (error) {
-          if (
-            !(
-              error instanceof CodeMemoryError &&
-              ["HISTORY_BUSY", "HISTORY_MODEL_BUSY"].includes(error.code)
-            )
-          )
-            log("error", "history_worker_failed", { error: publicError(error) });
-        }
-      }
-    })()
-      .catch(() => log("error", "memory_worker_failed"))
+    workerPending = runBackgroundWork(services, workerAbort.signal)
+      .catch((error) => log("error", "memory_worker_failed", { error: publicError(error) }))
       .finally(() => {
         workerBusy = false;
       });
@@ -372,14 +427,20 @@ export async function runMcpWorkspace(
     clearInterval(workerTimer);
     workerAbort.abort();
     closing ??= (async () => {
-      await pending;
-      await workerPending;
-      await Promise.all(entries.map((e) => e.session.close()));
-      await handle.close();
-      await Promise.all(entries.map((e) => e.store.close()));
+      const closed = await closeWorkspace(
+        entries,
+        [pending, workerPending],
+        () => handle.close(),
+        options.shutdownDeadlineMs,
+      );
       process.stdin.pause();
       process.removeListener("SIGINT", onSignal);
       process.removeListener("SIGTERM", onSignal);
+      if (!closed) {
+        // A running publish or parser keeps the event loop alive; end the process explicitly.
+        process.exitCode = 1;
+        (options.onForcedExit ?? ((code: number) => process.exit(code)))(1);
+      }
     })();
     return closing;
   };

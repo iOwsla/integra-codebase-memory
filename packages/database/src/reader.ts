@@ -68,7 +68,7 @@ export class PostgresIndexReader implements IndexReader {
     const rows = await this.query<{ data: CodeSymbol; score: number; reason: string }>(
       `
       WITH candidates AS (
-        SELECT s.*, f.data->>'generated'='true' AS generated,
+        SELECT s.*, COALESCE(f.generated, (f.data->>'generated')='true') AS generated,
           CASE WHEN lower(s.name)=$2 THEN 100 WHEN lower(s.qualified_name)=$2 THEN 95
                WHEN lower(s.name) LIKE $3 THEN 80 WHEN lower(s.name) LIKE $4 THEN 65
                ELSE 50*similarity(lower(s.name),$2) END AS base_score,
@@ -81,7 +81,11 @@ export class PostgresIndexReader implements IndexReader {
       ) SELECT data,
         base_score * CASE WHEN data->>'kind' IN ('IMPORT','EXPORT') THEN 0.6 ELSE 1 END * CASE WHEN generated THEN 0.5 ELSE 1 END AS score,
         base_reason || CASE WHEN data->>'kind' IN ('IMPORT','EXPORT') THEN '; alias declaration' ELSE '' END || CASE WHEN generated THEN '; generated penalty' ELSE '' END AS reason
-      FROM candidates ORDER BY score DESC, data->>'file' COLLATE "C", (data->>'startLine')::int, id COLLATE "C"
+      FROM candidates c
+      ORDER BY score DESC,
+        CASE WHEN data->>'file' ~ '(^|/)(__tests__|tests?|spec)/|\\.(test|spec)\\.' THEN 1 ELSE 0 END,
+        CASE WHEN data->>'kind' IN ('CLASS','INTERFACE') THEN 0 WHEN data->>'kind' IN ('FUNCTION','METHOD') THEN 1 ELSE 2 END,
+        data->>'file' COLLATE "C", (data->>'startLine')::int, c.id COLLATE "C"
       LIMIT $6 OFFSET $7`,
       [q, `${pattern}%`, `%${pattern}%`, kinds, page.limit + 1, page.offset],
     );
@@ -90,6 +94,9 @@ export class PostgresIndexReader implements IndexReader {
       page,
     );
   }
+  /** One statement: with files_path_c (migration 10) the planner walks matching files in
+   * path order and stops at LIMIT. Measured on kiosk-software-last (5,660 files) this beat
+   * a batched cursor variant on every query, e.g. "create" 2 ms vs 94 ms. */
   async searchCode(query: string, page: PageRequest) {
     this.checkPage(page);
     const pattern = `%${literalPattern(query.toLowerCase())}%`;
@@ -112,7 +119,13 @@ export class PostgresIndexReader implements IndexReader {
       SELECT left(array_to_string((regexp_split_to_array(data->>'content', E'\\r?\\n'))[$3:$4], E'\\n'),4000) AS snippet,
         length(array_to_string((regexp_split_to_array(data->>'content', E'\\r?\\n'))[$3:$4], E'\\n'))>4000 AS "characterTruncated",
         (SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1 AND target_id=$5) AS incoming,
-        (SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1 AND source_id=$5) AS outgoing
+        (SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1 AND source_id=$5) AS outgoing,
+        (SELECT coalesce(jsonb_object_agg(edge_type,n),'{}') FROM (SELECT edge_type, count(*)::int AS n
+          FROM symbol_edges WHERE repository_id=$1 AND target_id=$5 GROUP BY edge_type) t) AS "incomingByType",
+        (SELECT coalesce(jsonb_object_agg(edge_type,n),'{}') FROM (SELECT edge_type, count(*)::int AS n
+          FROM symbol_edges WHERE repository_id=$1 AND source_id=$5 GROUP BY edge_type) t) AS "outgoingByType",
+        (SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1 AND target_id=$5
+          AND source_id<>$5 AND edge_type NOT IN ('DECLARES','EXPORTS')) AS "usageIncoming"
       FROM files WHERE repository_id=$1 AND id=$2`,
       [symbol.fileId, symbol.startLine, Math.min(symbol.endLine, symbol.startLine + 15), symbol.id],
     );
@@ -172,7 +185,12 @@ export class PostgresIndexReader implements IndexReader {
    * implementation. Only instance members dispatch: constructors and static members
    * keep their direct callers alone, and `super.member()` calls (edge metadata
    * receiver "super") always run the base implementation. Members match by name on a
-   * declared IMPLEMENTS/EXTENDS ancestor. */
+   * declared IMPLEMENTS/EXTENDS ancestor. Rows expose the edge's recorded receiver
+   * static type as `dispatch.receiverType`. A class receiver that is not one of those
+   * ancestors is dropped. This is a nominal heuristic: TypeScript checks
+   * assignability structurally, so an instance can also be held by a sibling class
+   * that declares no extra members, and such callers are omitted. Interface
+   * receivers, and receivers whose symbol is no longer indexed, are always kept. */
   private async callers(symbol: CodeSymbol, page: PageRequest) {
     const rows = await this.query<{
       data: Record<string, unknown>;
@@ -208,7 +226,12 @@ export class PostgresIndexReader implements IndexReader {
       SELECT e.data, s.data AS symbol, t.via FROM targets t
       JOIN symbol_edges e ON e.repository_id=$1 AND e.target_id=t.id AND e.edge_type='CALLS'
       JOIN symbols s ON s.repository_id=e.repository_id AND s.id=e.source_id
-      WHERE t.via IS NULL OR e.data#>>'{metadata,receiver}' IS DISTINCT FROM 'super'
+      WHERE t.via IS NULL OR (
+        e.data#>>'{metadata,receiver}' IS DISTINCT FROM 'super'
+        AND (e.data#>>'{metadata,receiverType}' IS NULL
+          OR e.data#>>'{metadata,receiverType}' IN (SELECT id FROM supers)
+          OR NOT EXISTS (SELECT 1 FROM symbols r WHERE r.repository_id=$1
+            AND r.id=e.data#>>'{metadata,receiverType}' AND r.data->>'kind'='CLASS')))
       ORDER BY s.data->>'file' COLLATE "C", (e.data->>'line')::int, e.id COLLATE "C" LIMIT $3 OFFSET $4`,
       [symbol.id, page.limit + 1, page.offset],
     );
@@ -216,14 +239,25 @@ export class PostgresIndexReader implements IndexReader {
       rows.map(({ data, symbol, via }) => ({
         ...data,
         symbol,
-        ...(via ? { dispatch: { via } } : {}),
+        ...(via
+          ? {
+              dispatch: {
+                via,
+                receiverType:
+                  (data.metadata as { receiverType?: string } | undefined)?.receiverType ?? null,
+              },
+            }
+          : {}),
       })),
       page,
     );
   }
   private async qualityMetadata() {
+    // Publish records the total with each run; count rows only for older runs without it.
     const [row] = await this.query<{ count: string }>(
-      "SELECT count(*)::text AS count FROM unresolved_references WHERE repository_id=$1",
+      `SELECT COALESCE(
+        (SELECT (data->'totals'->>'unresolvedReferences')::bigint FROM index_runs WHERE repository_id=$1 ORDER BY id DESC LIMIT 1),
+        (SELECT count(*) FROM unresolved_references WHERE repository_id=$1))::text AS count`,
     );
     return {
       candidateOnly: true,
@@ -244,7 +278,7 @@ export class PostgresIndexReader implements IndexReader {
       WHERE s.repository_id=$1 AND s.data->>'kind'='FUNCTION'
         AND s.data->>'exported'='false' AND s.name NOT LIKE '<%'
         AND s.data->'metadata'->>'bodyHash' IS NOT NULL
-        AND f.data->>'status'='INDEXED' AND f.data->>'generated'='false'
+        AND COALESCE(f.file_status, f.data->>'status')='INDEXED' AND COALESCE(f.generated, (f.data->>'generated')='true')=false
         AND NOT EXISTS (SELECT 1 FROM symbol_edges e WHERE e.repository_id=s.repository_id
           AND e.target_id=s.id AND e.source_id<>s.id AND e.edge_type<>'DECLARES')
       ORDER BY s.data->>'file' COLLATE "C", (s.data->>'startLine')::int, s.id COLLATE "C"
@@ -285,7 +319,7 @@ export class PostgresIndexReader implements IndexReader {
         FROM symbols s JOIN files f ON f.repository_id=s.repository_id AND f.id=s.file_id
         WHERE s.repository_id=$1 AND s.data->'metadata'->>'bodyHash' IS NOT NULL
           AND (s.data->'metadata'->>'bodyLength')::int >= $2
-          AND f.data->>'status'='INDEXED' AND f.data->>'generated'='false'
+          AND COALESCE(f.file_status, f.data->>'status')='INDEXED' AND COALESCE(f.generated, (f.data->>'generated')='true')=false
       ) SELECT jsonb_build_object('id',id,'name',name,'file',data->>'file',
           'startLine',data->'startLine','endLine',data->'endLine','kind',data->>'kind',
           'bodyStartLine',data->'metadata'->'bodyStartLine','bodyEndLine',data->'metadata'->'bodyEndLine') AS symbol,
@@ -403,17 +437,50 @@ export class PostgresIndexReader implements IndexReader {
     const neighbor = direction === "incoming" ? "source_id" : "target_id";
     const paths: string[][] = [],
       queue: string[][] = [[from]],
-      adjacency = new Map<string, string[]>();
+      adjacency = new Map<string, string[]>(),
+      prefetched = new Map<string, string[]>();
     let truncated = false,
       steps = 0,
-      fetched = 0;
+      fetched = 0,
+      head = 0;
     const deadline = Date.now() + 5000;
-    while (queue.length && paths.length < maxPaths && steps++ < 10000) {
+    // Neighbours of every uncached node still queued (the rest of the current BFS
+    // level) load in one statement. Each list holds one row more than the largest
+    // limit it can be committed with, so committing on dequeue below applies the
+    // node, fetched and per-source caps exactly as one query per node would. A batch
+    // takes only as many sources as the remaining fetched budget can fill at the
+    // per-source limit, so one statement does no more work than the per-node loop
+    // would before stopping.
+    const prefetch = async (start: number) => {
+      const sources: string[] = [];
+      const perSource = Math.min(1000, 10000 - fetched) + 1;
+      const room = Math.min(
+        128 - adjacency.size,
+        Math.max(1, Math.floor((10000 - fetched) / (perSource - 1))),
+      );
+      for (let i = start; i < queue.length && sources.length < room; i++) {
+        const path = queue[i] as string[],
+          id = path[path.length - 1] as string;
+        if (path.length > maxDepth || adjacency.has(id) || prefetched.has(id)) continue;
+        if (!sources.includes(id)) sources.push(id);
+      }
+      const rows = await this.query<{ src: string; id: string }>(
+        `SELECT a.src, n.id FROM unnest($2::text[]) WITH ORDINALITY AS a(src, ord)
+         CROSS JOIN LATERAL (SELECT DISTINCT ${neighbor} COLLATE "C" AS id FROM symbol_edges
+           WHERE repository_id=$1 AND ${anchor}=a.src AND (cardinality($3::text[])=0 OR edge_type=ANY($3))
+           ORDER BY id LIMIT $4) n
+         ORDER BY a.ord, n.id`,
+        [sources, types, perSource],
+      );
+      for (const id of sources) prefetched.set(id, []);
+      for (const row of rows) prefetched.get(row.src)?.push(row.id);
+    };
+    while (head < queue.length && paths.length < maxPaths && steps++ < 10000) {
       if (Date.now() > deadline) {
         truncated = true;
         break;
       }
-      const path = queue.shift() as string[],
+      const path = queue[head++] as string[],
         last = path[path.length - 1] as string;
       if (path.length > maxDepth) {
         paths.push(path);
@@ -425,13 +492,12 @@ export class PostgresIndexReader implements IndexReader {
           truncated = true;
           break;
         }
+        if (!prefetched.has(last)) await prefetch(head - 1);
         const limit = Math.min(1000, 10000 - fetched);
-        const rows = await this.query<{ id: string }>(
-          `SELECT DISTINCT ${neighbor} COLLATE "C" AS id FROM symbol_edges WHERE repository_id=$1 AND ${anchor}=$2 AND (cardinality($3::text[])=0 OR edge_type=ANY($3)) ORDER BY id LIMIT $4`,
-          [last, types, limit + 1],
-        );
+        const rows = prefetched.get(last) ?? [];
+        prefetched.delete(last);
         if (rows.length > limit) truncated = true;
-        next = rows.slice(0, limit).map((r) => r.id);
+        next = rows.slice(0, limit);
         fetched += next.length;
         adjacency.set(last, next);
       }
@@ -441,13 +507,13 @@ export class PostgresIndexReader implements IndexReader {
         continue;
       }
       for (const id of available) {
-        if (queue.length >= 1000) {
+        if (queue.length - head >= 1000) {
           truncated = true;
           break;
         }
         queue.push([...path, id]);
       }
     }
-    return { paths, truncated: truncated || queue.length > 0 };
+    return { paths, truncated: truncated || head < queue.length };
   }
 }

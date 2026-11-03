@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.1.0-alpha.35 — 2026-11-03
+
+- Migration 14 stores each file's generated flag in a `generated` column. `search_symbols` and the dead-code and duplicate reports no longer decompress a file's whole source for every candidate symbol: on kiosk-software-last `search_symbols get` (7,018 candidates) fell from 151 ms to 23 ms.
+- Migration 13 indexes non-INDEXED files by the `file_status` column. The incomplete-coverage check that runs before every query no longer detoasts every file's content: per-call overhead on a 5,660-file project fell from about 59 ms to 1 ms.
+- Indexing an unmigrated database now fails with `SCHEMA_OUTDATED` ("Run codememory system setup to migrate") instead of a raw "column does not exist" error. That error and database connection failures retry once per `reconcileMs` instead of backing off exponentially, so open sessions recover soon after setup.
+- Migration 12 adds a trigger that derives the `files` metadata columns from the stored JSON on every write, so an older release (or manual SQL) that writes only the JSON can no longer leave stale hashes that hide changes or keep an outdated graph. Rows that already drifted are queued for the backfill once, and publication also rewrites a row whose columns disagree with its JSON.
+- The post-publish `ANALYZE` runs only for tables whose written and deleted rows exceed 10,000 and 10% of the table's estimated size (or that were never analyzed), and logs them as `tables`. A one-file edit in a small project no longer analyzes the shared tables of every project.
+- A chokidar watch error (for example `ENOSPC` from the inotify limit) stays in `codebase_status` as `watcher: false` with `watchError` until the session restarts. Events from paths still watched no longer clear it; changes under the unwatched paths are found by the periodic reconcile.
+- `install-project --write`, `system install-cli` and `system setup` rewrite the shared launchers under the update lock, so a lock left by a killed update (dead process, or empty and older than 10 seconds) is recovered instead of blocking them.
+- A failed `ROLLBACK` after a lost connection no longer replaces the original error (for example `57P01`); the connection is discarded.
+- A `.codememoryignore` that links outside the project, into a nested repository or nowhere (dangling) now fails the scan with `IGNORE_FILE_OUT_OF_SCOPE` instead of indexing the files it would hide. Such a `.gitignore` is still treated as absent, as git does, but is counted under `exclusions.byReason.IGNORE_FILE_OUT_OF_SCOPE.other` (not `files`) with an `exclusions.diagnostics` entry naming its path. Ignore-file text is stored under the walked path, never the link target.
+- The scanner's nested-repository fast path no longer applies to a path resolved through a symlink, so a directory swapped mid-scan for a link into a nested repository is rejected with `PATH_OUT_OF_SCOPE` again.
+- MCP shutdown cancels the running index immediately instead of after pending background work, and bounds the whole teardown by one 10 s deadline. When a publish is still running at the deadline, the server logs `session_close_timeout` and exits with code 1 instead of waiting minutes for the database pool; PostgreSQL rolls back the open publish and releases the project lock.
+- History workers also hold the alpha.34 global history-worker lock in shared mode, so a not-yet-restarted alpha.34 history process and a new worker can no longer process the same job at once. Workers for different projects still run concurrently.
+- WIP capture writes an UNSTAGED deletion for a tracked file deleted mid-sweep instead of a NOT_FOUND gap, and re-checks the worktree path set once at the end of the sweep; a changed set records `WIP_SCOPE_CHANGED` and an INCONSISTENT cursor.
+- The history excerpt quota re-reads the stored total before failing with HISTORY_QUOTA, and `history cleanup --apply` resets the cached total of in-flight collections. Automatic collection paused by HISTORY_QUOTA resumes once space has been freed.
+- Turning `excludeGenerated` off with an unchanged HEAD now re-walks Git history, so generated sources that are now allowed are collected.
+- Ctrl+C, SIGTERM or SIGHUP during a bootstrap upgrade (`install.sh` / `install-project.ts --write --upgrade`) now rolls back project configs and the management CLI at the next step and releases the update lock, like `codememory update`; the installer exits with code 130.
+- The runtime launcher no longer fails with a raw `ENOENT` error when an empty update lock is removed between its read and its age check; the launch proceeds.
+- Parser crash messages in `codebase_status` no longer expose absolute paths: the project root becomes `.` only at a path boundary (a sibling such as `/a/project2` is no longer rewritten to `./ject2`), the home directory becomes `~`, and other absolute POSIX or Windows paths collapse to `…/` plus the file name.
+- Migration 11 drops the foreign keys and primary key of `symbol_edges`. Publication now deletes edges of removed symbols itself, matching the former cascade. On 300k real edges this raised edge insert throughput 2.3-2.5x and halved WAL volume.
+- Record the receiver's static class/interface on call edges (`receiverType`). `find_callers` drops a dispatch row whose receiver is a class that is not an ancestor of the queried member, so calls on a sibling subclass that inherits the base member are no longer reported as possible callers of an override. This class check is a nominal heuristic: under TypeScript's structural typing a structurally compatible object can still reach the override at runtime. Rows whose receiver is an interface are always kept. The analyzer version changes, so existing indexes re-analyze once.
+- evaluate-project: exclude `this` keyword matches and inherited-member calls on sibling receivers from the language-service oracle.
+- Incremental publication sends, upserts and deletes symbols only for files whose analysis changed, instead of every symbol in the project, and no longer forces a synchronous full GC every 50,000 rows. `CODEMEMORY_PROFILE=1` reports a `digest` phase.
+- A configuration-only change (for example `package.json`) no longer rewrites file rows whose stored data is unchanged.
+- Duplicate unresolved-reference ids in one analysis no longer abort publication; the first row is kept.
+- A dropped PostgreSQL connection during a query, memory search or memory save now rejects that call instead of crashing the process.
+- Migration 10 drops the unused `symbols_fuzzy` and `edges_type` indexes, adds nullable `hash`, `file_status` and `analysis_hash` columns to `files` so scans and publication no longer read file content, adds `files_path_c` and adds `repositories.version_floor`. The columns are a catalog-only change, not a table rewrite; publication writes them, existing rows are backfilled in 500-row batches after the migration commits, and readers fall back to the stored JSON until then. Migrations run without the 30 s statement budget and fail after a 30 s lock wait instead of blocking readers. `codememory update` and `bootstrap --upgrade` now apply pending migrations to the managed database after stopping the old MCP processes and before switching the active runtime; a failed migration keeps the previous runtime. For a project on an external `DATABASE_URL`, activation only checks the schema: a database on an older migration blocks activation until `bun scripts/migrate.ts` has been run against it, while an empty or unreachable one lets activation continue with that instruction.
+- A RUNNING index job whose owner no longer holds the project lock is reported as interrupted with `freshness: LAST_COMPLETED` in `status` and query metadata, not UPDATING.
+- Publication keeps the latest 20 index runs per project; recording a failure prunes index errors older than 30 days.
+- `clean` and `remove` delete set-wise under a 10-minute statement budget so large projects no longer hit the 30 s timeout. `clean` also deletes run history and the last index job, and later index versions continue above the pre-clean version.
+- `debug unresolved` reads only the first 100 unresolved references by id and prints `{ total, results }` instead of loading the whole project snapshot.
+- `search_code` walks matching files in path order through the new `files_path_c` index and stops at the page limit; on kiosk-software-last a first page for a common word takes about 2-15 ms.
+- Order equal-score `search_symbols` results with non-test files first, then classes/interfaces, then functions/methods; scores and reasons are unchanged.
+- Add `incomingByType`, `outgoingByType` and `usageIncoming` (excluding `DECLARES`, `EXPORTS` and self-edges) to `get_symbol`; `incoming`/`outgoing` keep their raw totals.
+- Read the unresolved-reference count in dead-code and duplicate reports from the latest index run totals instead of counting rows on every page.
+- Load `trace_dependencies` adjacency for a whole breadth-first level in one query; paths, truncation and bounds are unchanged.
+- Detect Prisma queries through classes that extend a generated client, such as the NestJS `class PrismaService extends PrismaClient`, so `find_references` on a model or field lists those calls.
+- Fix publication failing with a duplicate key when a composite `@relation` is missing more than one field; each missing pair is now its own unresolved record.
+- Keep `find_callers` dispatch rows when calls with different receivers to the same member share a line; merged call edges keep only receiver metadata that every call agrees on.
+- Resolve namespace-import references (`import * as utils`) to the imported file's FILE symbol instead of its first declaration.
+- Report a TypeScript checker failure on one file as an `ANALYSIS_ERROR` diagnostic and continue with the other files instead of aborting the project analysis.
+- The analyzer version changes again, so existing indexes re-analyze once.
+- Cancel a running index when a session closes: the parser worker is killed, nothing is published, and MCP shutdown waits at most 10 seconds. A parser worker whose parent dies now exits within about a second.
+- Back off retries of a failing index exponentially (from `reconcileMs` up to one hour, reported as `retryAfterMs`) instead of re-analyzing unchanged input on every reconcile; a file change retries immediately.
+- Keep watcher failures visible in `codebase_status` (`watcher: false`, `watchError`) after later successful indexes, reconcile at once, and re-arm the macOS native watcher with backoff.
+- Stop reporting an interrupted index job (RUNNING without its lock) as UPDATING in session status.
+- Serve query freshness from in-memory session state instead of running the full status query before every tool call.
+- Exclude `.gitignore` and `.codememoryignore` text from the index fingerprint so editing them no longer marks every file changed. Projects with ignore files re-analyze once after upgrading.
+- Serve `get_file_outline` and `get_file_context` from the indexed snapshot for files deleted on disk, marked `sourceOnDisk: false`.
+- Include the sanitized tail of parser worker stderr in the error when the worker crashes.
+- Isolate background memory worker failures per project and log their error codes with the project scope.
+- Raise the default `parserOutputLimitMiB` from 1024 to 4096. Configs written by `init` earlier keep an explicit `1024`; raise or remove it to use the new default.
+- Report a `.codememory/config.json` that is not valid JSON as `CONFIGURATION_ERROR` instead of `INTERNAL_ERROR`, and accept a leading UTF-8 BOM.
+- Keep scanning when a directory or config file disappears mid-scan (counted as `CONFIG_VANISHED`) or `.gitignore` is symlinked outside the root (`IGNORE_FILE_OUT_OF_SCOPE`). An unreadable directory now fails with `SCAN_UNREADABLE_DIRECTORY` naming its relative path.
+- Index source files that contain a literal NUL byte instead of skipping them as binary; the NUL is stored as a space. Files with a UTF-16 BOM, mostly-NUL content or invalid UTF-8 with NULs are still skipped.
+- Skip the repeated nested-repository ancestor check for files the scanner already vetted while walking, reducing per-file filesystem calls.
+- Fix `codememory update` and `bootstrap --upgrade` never stopping running MCP servers: process discovery now accepts the installer's `--session-projects` flag in any order. An MCP process for a registered project that runs from an unverified checkout now blocks the update until its client is closed.
+- Roll back activation on SIGINT, SIGTERM or SIGHUP and release `update.lock`; retire older release entries only after the active pointer is published, and treat an empty lock older than 10 seconds as stale instead of failing with a parse error.
+- Let the shared launcher start when `update.lock` is stale (dead owner or an old empty file), report which live update blocks it, and refuse an active entry that forwards back to the launcher instead of spawning itself without end.
+- Fix `projects remove` for paths reached through symlinks; a registration whose directory was deleted can still be disabled by its path.
+- Run managed PostgreSQL with `max_wal_size=4GB`, `checkpoint_timeout=15min` and `wal_compression=lz4`; setup recreates the container and keeps the data volume.
+- History collection keeps incremental Git collection after binary, oversized, generated, undecodable, symlink or submodule gaps; only other Git-stage gaps (`blockingGapCount`) force a full re-walk. Cursors written before this release fall back to `gapCount`.
+- History collection lists commits in pages of 1,000, runs `git show` and `diff-tree` once per commit and parent, reads each blob with one Git process, discovers the worktree once per job for DOCUMENTS and WIP, saves job progress once per batch, and reads the excerpt quota baseline once per job.
+- The history worker lock is per project, so a batch in one project no longer makes other projects fail with `HISTORY_BUSY`.
+- Automatic history mode no longer adds a FAILED job every 30 seconds after `HISTORY_QUOTA`. Terminal collection jobs older than seven days are pruned, keeping the latest per worktree.
+- WIP capture treats CRLF-only differences as clean and records filtered, ident, re-encoded and Git LFS pointer paths as `UNSUPPORTED_SOURCE` instead of reporting them as unstaged edits.
+- `engineering_context` resolves HEAD once per request instead of once per search. Deleted history sources report `sourceState: NOT_FOUND` instead of `HISTORY_READ_ERROR`.
+- An interpretation job interrupted by shutdown or a lost provider lease returns to the queue without consuming an attempt.
+- Requeue a memory workflow job when the worker stops mid-inference (Ctrl+C or an MCP client disconnect) instead of marking it FAILED with `MEMORY_CANCELLED`; the interrupted run no longer counts toward the three-attempt retry limit.
+
 ## 0.1.0-alpha.34 — 2026-11-03
 
 - Load TypeScript standard-library declarations (`lib.d.ts` and `lib.*.d.ts`) from CodeMemory's own TypeScript package during analysis. Member calls through `Record`, `Promise` and other built-in generics now resolve instead of being recorded as unresolved; library declarations are never indexed. The analyzer version changes, so existing indexes re-analyze once.

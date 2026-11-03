@@ -53,6 +53,15 @@ it("keeps credentials and volume identity across repeated setup, ignores applica
     expect(compose.services.postgres.restart).toBe("unless-stopped");
     expect(compose.services.postgres.mem_limit).toBe("1g");
     expect(compose.services.postgres.cpus).toBe(1);
+    expect(compose.services.postgres.command).toEqual([
+      "postgres",
+      "-c",
+      "max_wal_size=4GB",
+      "-c",
+      "checkpoint_timeout=15min",
+      "-c",
+      "wal_compression=lz4",
+    ]);
     expect(compose.volumes.data.name).toBe(volumeName);
     await setupServices({
       directory,

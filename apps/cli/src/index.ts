@@ -29,7 +29,7 @@ import { registerProviderCommands } from "./providers";
 const cli = new Command()
   .name("codememory")
   .description("Local, explicitly project-scoped code intelligence")
-  .version("0.1.0-alpha.34")
+  .version("0.1.0-alpha.35")
   .enablePositionalOptions();
 registerManagementCommands(cli);
 registerProviderCommands(cli);
@@ -318,8 +318,7 @@ scoped("debug <subject>", "Inspect unresolved references or effective config").a
     const app = await open(options.project);
     try {
       if (subject === "config") print(app.context.effectiveConfig);
-      else if (subject === "unresolved")
-        print((await app.store.snapshot(app.context)).unresolved.slice(0, 100));
+      else if (subject === "unresolved") print(await app.store.unresolvedSample(app.context, 100));
       else throw new CodeMemoryError("INVALID_ARGUMENT", "Use debug config or debug unresolved");
     } finally {
       await app.store.close();

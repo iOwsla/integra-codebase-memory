@@ -304,3 +304,74 @@ it("cancels model work when the database lease is lost and never publishes stale
     await t.dispose();
   }
 });
+
+it("requeues a job cancelled by worker shutdown without spending a retry attempt", async () => {
+  const t = await setup();
+  try {
+    await t.workflow.configure(true);
+    const job = await t.workflow.submit(batch);
+    let entered: () => void = () => {};
+    const started = new Promise<void>((r) => {
+      entered = r;
+    });
+    vi.mocked(t.p.extract).mockImplementationOnce(async (_input, signal) => {
+      entered();
+      await new Promise<void>((_resolve, reject) =>
+        signal?.addEventListener(
+          "abort",
+          () => reject(new CodeMemoryError("MEMORY_CANCELLED", "Worker stopped")),
+          { once: true },
+        ),
+      );
+      return { output: { candidates: [candidate] }, metrics: {} };
+    });
+    const controller = new AbortController();
+    const working = t.workflow.workOnce(controller.signal);
+    await started;
+    controller.abort();
+    expect(await working).toBe(false);
+    const requeued = await t.db.store.memoryJob(t.c, job.jobId);
+    expect(requeued).toMatchObject({ state: "QUEUED", attempts: 0 });
+    expect(requeued.owner).toBeUndefined();
+    expect(requeued.phase).toBeUndefined();
+    expect(requeued.error).toBeUndefined();
+    expect(await t.workflow.workOnce(new AbortController().signal)).toBe(true);
+    expect(await t.db.store.memoryJob(t.c, job.jobId)).toMatchObject({
+      state: "SUCCEEDED",
+      attempts: 1,
+      candidates: [{ state: "READY" }],
+    });
+  } finally {
+    await t.dispose();
+  }
+});
+
+it("still fails provider errors that are not worker cancellations", async () => {
+  const t = await setup();
+  try {
+    await t.workflow.configure(true);
+    const job = await t.workflow.submit(batch);
+    vi.mocked(t.p.extract).mockRejectedValueOnce(
+      new CodeMemoryError("MEMORY_PROVIDER_PROTOCOL", "Bad reply"),
+    );
+    expect(await t.workflow.workOnce(new AbortController().signal)).toBe(true);
+    expect(await t.db.store.memoryJob(t.c, job.jobId)).toMatchObject({
+      state: "FAILED",
+      error: "MEMORY_PROVIDER_PROTOCOL",
+      attempts: 1,
+    });
+    // A cancellation code while the worker is still running is a real failure.
+    await t.workflow.retry(job.jobId);
+    vi.mocked(t.p.extract).mockRejectedValueOnce(
+      new CodeMemoryError("MEMORY_CANCELLED", "Cancelled"),
+    );
+    expect(await t.workflow.workOnce(new AbortController().signal)).toBe(true);
+    expect(await t.db.store.memoryJob(t.c, job.jobId)).toMatchObject({
+      state: "FAILED",
+      error: "MEMORY_CANCELLED",
+      attempts: 2,
+    });
+  } finally {
+    await t.dispose();
+  }
+});

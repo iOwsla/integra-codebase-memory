@@ -48,7 +48,9 @@ export function loadUsers() {
 
 The resolver follows the imported constructor and model delegate through lexical
 `const` aliases, destructuring and statically resolved local imports/re-exports.
-Unshadowed CommonJS `require` imports of PrismaClient are also supported.
+Unshadowed CommonJS `require` imports of PrismaClient are also supported, as are
+classes that extend it, such as the NestJS `class PrismaService extends PrismaClient`
+injected through a typed constructor parameter (`this.prisma.user.findMany()`).
 It also supports extracted query methods, client properties with imported
 PrismaClient types, `Prisma.UserDelegate` types and interactive transaction
 parameters. A variable merely named `user`, `prisma` or `db` is insufficient.

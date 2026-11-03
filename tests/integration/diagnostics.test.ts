@@ -19,7 +19,7 @@ it("reports syntax locations, bounded diagnostics and distinct exclusions while 
     "good.ts": "export function healthy(){return 42}",
     "broken.mjs": "const text = 'schema'dan';\nconst other = 'it's broken';\n".repeat(10),
     "large.ts": " ".repeat(2048),
-    "binary.ts": "\0",
+    "binary.ts": `${"\0".repeat(64)}\x01\x02`,
   });
   try {
     const c = await createProjectContext(f.root);
@@ -199,7 +199,7 @@ it("ignores temporary report syntax errors while preserving real-source coverage
       diagnosticSummary: { total: 0 },
       incompleteReasons: [],
     });
-    await writeFile(resolve(f.root, "src/service.ts"), "\0");
+    await writeFile(resolve(f.root, "src/service.ts"), Buffer.alloc(64));
     await index.index();
     const status = await service.status();
     expect(status.incomplete).toBe(true);
@@ -237,6 +237,27 @@ it("reconciles ignore-file changes without editing source or restarting the cont
     await unlink(resolve(f.root, ".codememoryignore"));
     await index.index();
     expect(await service.status()).toMatchObject({ incomplete: true, files: 2 });
+  } finally {
+    await db.dispose();
+    await f.dispose();
+  }
+});
+
+it("publishes a source file containing a literal NUL with its symbols", async () => {
+  const db = await testDatabase();
+  const f = await fixture({ "nul.ts": 'export function withNul(){return "a\0b"}' });
+  try {
+    const c = await createProjectContext(f.root);
+    await db.store.register(c);
+    await new IndexService(c, db.store, new RepositoryScanner(), new TypeScriptPlugin()).index();
+    const service = new CodebaseService(c, db.store);
+    expect(await service.execute("search_symbols", { query: "withNul" })).toMatchObject({
+      results: [{ name: "withNul" }],
+    });
+    const status = await service.status();
+    expect(status.incompleteReasons).not.toContainEqual(
+      expect.objectContaining({ reason: "SKIPPED_BINARY" }),
+    );
   } finally {
     await db.dispose();
     await f.dispose();

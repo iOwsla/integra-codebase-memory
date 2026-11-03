@@ -55,6 +55,8 @@ export interface MemoryWorkflowStore {
   retryMemoryJob(c: ProjectContext, id: string): Promise<void>;
   workMemory(
     c: ProjectContext,
+    /** The worker's own stop signal; cancellation through it requeues the job. */
+    workerSignal: AbortSignal | undefined,
     run: (
       job: MemoryJob,
       progress: (phase: string, metrics?: Record<string, unknown>) => Promise<void>,

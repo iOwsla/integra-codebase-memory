@@ -135,6 +135,19 @@ export class PrismaUsage {
       return this.property(this.typed(type.objectType, seen), type.indexType.literal.text);
     return;
   }
+  /**
+   * `class PrismaService extends PrismaClient {}` (NestJS) is itself a client
+   * constructor. Implements clauses and mixin calls are not followed.
+   */
+  private subclass(
+    node: ts.ClassDeclaration | ts.ClassExpression,
+    seen: Set<ts.Node>,
+  ): Binding | undefined {
+    const base = node.heritageClauses?.find((h) => h.token === ts.SyntaxKind.ExtendsKeyword)
+      ?.types[0]?.expression;
+    const binding = base ? this.resolve(base, seen) : undefined;
+    return binding?.kind === "constructor" ? binding : undefined;
+  }
   private resolve(node: ts.Node, seen = new Set<ts.Node>()): Binding | undefined {
     if (this.cache.has(node)) return this.cache.get(node) ?? undefined;
     if (seen.has(node) || seen.size > 40) return;
@@ -164,6 +177,7 @@ export class PrismaUsage {
       ts.isSatisfiesExpression(node)
     )
       return this.resolve(node.expression, seen);
+    if (ts.isClassExpression(node)) return this.subclass(node, seen);
     if (ts.isNewExpression(node)) {
       const binding = this.resolve(node.expression, seen);
       return binding?.kind === "constructor" ? { ...binding, kind: "client" } : undefined;
@@ -188,6 +202,11 @@ export class PrismaUsage {
     for (const declaration of declarations) {
       const imported = this.imported(declaration);
       if (imported) return imported;
+      if (ts.isClassDeclaration(declaration) || ts.isClassExpression(declaration)) {
+        const binding = this.subclass(declaration, seen);
+        if (binding) return binding;
+        continue;
+      }
       if (ts.isVariableDeclaration(declaration)) {
         if (!(declaration.parent.flags & ts.NodeFlags.Const)) continue;
         if (declaration.initializer) {
@@ -251,6 +270,21 @@ export class PrismaUsage {
     }
     return;
   }
+  /**
+   * A member declared by a project class that extends a Prisma client
+   * (`PrismaService.cleanDatabase()`) is ordinary project code, not a Prisma
+   * query: the caller records the normal CALLS edge for it.
+   */
+  private ownMember(name: ts.MemberName): boolean {
+    const symbol = this.checker.getSymbolAtLocation(name);
+    return (symbol?.declarations ?? []).some((declaration) => {
+      const parent = declaration.parent;
+      return (
+        (ts.isClassDeclaration(parent) || ts.isClassExpression(parent)) &&
+        this.subclass(parent, new Set()) !== undefined
+      );
+    });
+  }
   call(node: ts.CallExpression, owner: CodeSymbol): boolean {
     const binding = this.resolve(node.expression);
     const sf = node.getSourceFile(),
@@ -278,7 +312,8 @@ export class PrismaUsage {
       receiver?.kind === "delegate" ||
       (receiver?.kind === "client" &&
         ts.isPropertyAccessExpression(node.expression) &&
-        node.expression.name.text !== "$transaction")
+        node.expression.name.text !== "$transaction" &&
+        !this.ownMember(node.expression.name))
     ) {
       this.catalog.analysis.unresolved.push({
         id: id(owner.id, "PRISMA_QUERY", String(offset)),

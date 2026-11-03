@@ -59,10 +59,14 @@ const normalize = (path: string) =>
 function unquote(value: string) {
   return value.startsWith('"') && value.endsWith('"') ? value.slice(1, -1) : value;
 }
-/** Conservative legacy format; never match a process by name or PID alone. */
+const mcpFlags = new Set(["--auto-index", "--watch", "--session-projects"]);
+/**
+ * Installer format (`--auto-index --watch`, optionally `--session-projects`, in any order).
+ * Never match a process by name or PID alone; unknown or repeated flags are rejected.
+ */
 export function matchMcp(command: string, projects: string[], entries: string[]) {
   const match =
-    /^(?:"([^"]+)"|(\S+))\s+(.+?)\s+mcp\s+--project\s+(.+?)\s+--auto-index\s+--watch\s*$/.exec(
+    /^(?:"([^"]+)"|(\S+))\s+(.+?)\s+mcp\s+--project\s+(.+?)((?:\s+--(?:auto-index|watch|session-projects))+)\s*$/.exec(
       command,
     );
   if (
@@ -70,6 +74,14 @@ export function matchMcp(command: string, projects: string[], entries: string[])
     !/^bun(?:\.exe)?$/i.test(
       (match[1] || match[2] || "").replaceAll("\\", "/").split("/").pop() || "",
     )
+  )
+    return false;
+  const flags = (match[5] ?? "").trim().split(/\s+/);
+  if (
+    new Set(flags).size !== flags.length ||
+    flags.some((flag) => !mcpFlags.has(flag)) ||
+    !flags.includes("--auto-index") ||
+    !flags.includes("--watch")
   )
     return false;
   return (
@@ -136,7 +148,7 @@ export async function ownedProcesses(projects: string[]) {
       !entries.some((known) => normalize(known) === normalize(entry))
     )
       throw new Error(
-        `MCP process ${candidate.pid} is outside verified CodeMemory runtimes. Close that client connection before upgrading.`,
+        `MCP process ${candidate.pid} is outside verified CodeMemory runtimes (for example a development checkout). Close that client connection before upgrading.`,
       );
   }
   const selected = inventory.filter(
