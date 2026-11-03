@@ -310,12 +310,18 @@ updated_at=now(),attempts=attempts+CASE WHEN $3='RUNNING' AND state<>'RUNNING' T
       )
     ).rows[0] as HistoryJob | undefined;
   }
-  /** Deletes old terminal collection jobs, keeping the latest per worktree. Interpretation jobs are audit records. */
-  async pruneJobs(days: number) {
+  /**
+   * Deletes up to `limit` old terminal collection jobs, keeping the latest per worktree.
+   * Interpretation jobs are audit records. The kept set is computed once per statement
+   * (not per candidate row) and each call is bounded, so a large backlog drains over calls.
+   */
+  async pruneJobs(days: number, limit = 1000) {
     const result = await this.q(
-      `DELETE FROM history_jobs j WHERE j.repository_id=$1 AND j.kind='COLLECT' AND j.state IN ('SUCCEEDED','FAILED','CANCELLED') AND j.updated_at < now()-($2::int * interval '1 day')
-AND j.id <> (SELECT l.id FROM history_jobs l WHERE l.repository_id=$1 AND l.kind='COLLECT' AND l.data->>'worktreeId' IS NOT DISTINCT FROM j.data->>'worktreeId' ORDER BY l.created_at DESC,l.id DESC LIMIT 1)`,
-      [days],
+      `DELETE FROM history_jobs d WHERE d.repository_id=$1 AND d.id IN (
+SELECT j.id FROM history_jobs j WHERE j.repository_id=$1 AND j.kind='COLLECT' AND j.state IN ('SUCCEEDED','FAILED','CANCELLED') AND j.updated_at < now()-($2::int * interval '1 day')
+AND j.id NOT IN (SELECT DISTINCT ON (l.data->>'worktreeId') l.id FROM history_jobs l WHERE l.repository_id=$1 AND l.kind='COLLECT' ORDER BY l.data->>'worktreeId',l.created_at DESC,l.id DESC)
+LIMIT $3)`,
+      [days, limit],
     );
     return result.rowCount ?? 0;
   }

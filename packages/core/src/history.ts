@@ -93,7 +93,8 @@ export interface HistoryStore {
   saveJob(job: HistoryJob): Promise<void>;
   requeueCancelled(job: HistoryJob): Promise<void>;
   latestJob(kind: string, worktreeId: string): Promise<HistoryJob | undefined>;
-  pruneJobs(days: number): Promise<number>;
+  /** Deletes at most `limit` old terminal collection jobs per call. */
+  pruneJobs(days: number, limit?: number): Promise<number>;
   runExclusive<T>(
     action: (store: HistoryStore, leaseSignal: AbortSignal) => Promise<T>,
   ): Promise<T>;

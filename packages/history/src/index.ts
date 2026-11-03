@@ -20,6 +20,7 @@ import {
   GitCli,
   hash,
   id,
+  log,
   runtimeInfo,
 } from "@codememory/shared";
 import picomatch from "picomatch";
@@ -87,6 +88,8 @@ const nonBlockingGaps = new Set([
 ]);
 const commitPageSize = 1000;
 const jobRetentionDays = 7;
+/** Old jobs deleted per collection start, so a large legacy backlog drains over several runs. */
+const jobPruneChunk = 1000;
 interface QueryContext {
   current: { head: string | null; branch: string | null };
   hashes: Map<string, Promise<string>>;
@@ -334,7 +337,17 @@ export class HistoryService {
           }
         // The quota baseline is read once per job; batches carry the running total.
         const excerptBytes = Number((await db.stats()).excerptBytes);
-        await db.pruneJobs(jobRetentionDays);
+        // Retention is maintenance: a failure here must never block collection.
+        try {
+          await db.pruneJobs(jobRetentionDays, jobPruneChunk);
+        } catch (error) {
+          log("warn", "history_job_prune_failed", {
+            code:
+              error instanceof CodeMemoryError
+                ? error.code
+                : ((error as { code?: unknown }).code ?? "INTERNAL_ERROR"),
+          });
+        }
         const value: HistoryJob = {
           id: randomUUID(),
           kind: "COLLECT",

@@ -196,6 +196,69 @@ it("does not add an automatic job per tick after a quota failure and prunes old 
   }
 }, 30000);
 
+it("prunes a large legacy collection backlog in bounded chunks, keeping the latest per worktree", async () => {
+  const db = await testDatabase();
+  const f = await fixture({ "rule.md": "# Rule\nKeep one refund service." });
+  try {
+    const c = await createProjectContext(f.root);
+    await db.store.register(c);
+    // About 17 days of 30 s automatic ticks across two worktrees, all past retention.
+    await db.store.pool.query(
+      `INSERT INTO history_jobs(repository_id,id,kind,dedupe_key,state,data,created_at,updated_at)
+SELECT $1,'legacy-'||g,'COLLECT','legacy-'||g,CASE WHEN g%3=0 THEN 'FAILED' ELSE 'SUCCEEDED' END,
+jsonb_build_object('worktreeId',CASE WHEN g%2=0 THEN 'wt-a' ELSE 'wt-b' END),
+now()-interval '30 days'+g*interval '1 second',now()-interval '30 days'+g*interval '1 second'
+FROM generate_series(1,50000) g`,
+      [c.projectScopeId],
+    );
+    await db.store.pool.query("ANALYZE history_jobs");
+    const store = db.store.history(c);
+    const started = performance.now();
+    expect(await store.pruneJobs(7, 1000)).toBe(1000);
+    // One chunk must stay far below the 30 s statement timeout.
+    expect(performance.now() - started).toBeLessThan(5000);
+    let total = 1000;
+    for (let i = 0; i < 100; i++) {
+      const n = await store.pruneJobs(7, 5000);
+      total += n;
+      if (n === 0) break;
+    }
+    expect(total).toBe(49998);
+    const left = (
+      await db.store.pool.query("SELECT id FROM history_jobs WHERE repository_id=$1 ORDER BY id", [
+        c.projectScopeId,
+      ])
+    ).rows.map((r) => r.id);
+    expect(left).toEqual(["legacy-49999", "legacy-50000"]);
+  } finally {
+    await db.dispose();
+    await f.dispose();
+  }
+}, 60000);
+
+it("starts a collection even when job pruning fails", async () => {
+  const db = await testDatabase();
+  const f = await fixture({ "rule.md": "# Rule\nKeep one refund service." });
+  try {
+    const c = await createProjectContext(f.root);
+    await db.store.register(c);
+    const history = new HistoryService(c, db.store);
+    await history.configure({ documents: true, apply: true });
+    const prune = vi
+      .spyOn(Object.getPrototypeOf(db.store.history(c)), "pruneJobs")
+      .mockRejectedValue(Object.assign(new Error("canceling statement"), { code: "57014" }));
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    await collect(history);
+    expect(prune).toHaveBeenCalled();
+    expect(stderr.mock.calls.map(([line]) => String(line)).join("")).toContain(
+      '"event":"history_job_prune_failed","code":"57014"',
+    );
+  } finally {
+    await db.dispose();
+    await f.dispose();
+  }
+}, 30000);
+
 it("treats CRLF checkouts and LFS pointers as clean WIP but still records real edits", async () => {
   const db = await testDatabase();
   const f = await fixture({
