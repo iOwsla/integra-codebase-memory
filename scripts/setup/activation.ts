@@ -23,6 +23,21 @@ import {
 } from "./processes";
 import { checkLocalPath } from "./service-state";
 
+/** A lock may be empty only between its exclusive create and the owner write. */
+const lockGraceMs = 10000;
+async function lockOwner(path: string, previous: string) {
+  try {
+    const owner = JSON.parse(previous);
+    if (Number.isInteger(owner?.pid) && owner.pid > 0) return owner.pid as number;
+  } catch {}
+  const info = await stat(path).catch(() => {
+    throw new Error("Update lock changed; retry");
+  });
+  if (Date.now() - info.mtimeMs <= lockGraceMs)
+    throw new Error("Another CodeMemory update is active; wait for it to finish");
+  return null;
+}
+
 export async function updateLock<T>(action: () => Promise<T>) {
   const path = resolve(managementDirectory(), "update.lock");
   await checkLocalPath(path);
@@ -33,15 +48,15 @@ export async function updateLock<T>(action: () => Promise<T>) {
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
     const previous = await readFile(path, "utf8");
-    const owner = JSON.parse(previous);
-    if (!Number.isInteger(owner.pid) || owner.pid < 1)
-      throw new Error("Invalid update lock; inspect local management state");
-    let alive = true;
-    try {
-      process.kill(owner.pid, 0);
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ESRCH") alive = false;
-    }
+    // An empty or unparseable lock older than the grace period was left by a crashed writer.
+    const pid = await lockOwner(path, previous);
+    let alive = pid !== null;
+    if (pid !== null)
+      try {
+        process.kill(pid, 0);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ESRCH") alive = false;
+      }
     if (alive) throw new Error("Another CodeMemory update is active; wait for it to finish");
     if ((await readFile(path, "utf8")) !== previous) throw new Error("Update lock changed; retry");
     await rm(path);
@@ -54,8 +69,17 @@ export async function updateLock<T>(action: () => Promise<T>) {
   }
 }
 
-/** Prepare every project before stopping processes; publish the active pointer last. */
-export async function activateInstalledRuntime(selected?: Registration) {
+/**
+ * Prepare every project before stopping processes, then publish the active pointer and only
+ * afterwards retire older entries. An aborted signal rolls back at the next step boundary.
+ */
+export async function activateInstalledRuntime(
+  selected?: Registration,
+  options: { signal?: AbortSignal } = {},
+) {
+  const checkpoint = () => {
+    if (options.signal?.aborted) throw new Error("Activation interrupted");
+  };
   return updateLock(async () => {
     const registrations = await listRegistrations();
     if (selected) {
@@ -121,7 +145,9 @@ export async function activateInstalledRuntime(selected?: Registration) {
       plan.changedFiles.map((file) => resolve(project.root, file)),
     );
     paths.push(...bridges.map((bridge) => bridge.path));
+    const activePath = resolve(managementDirectory(), "active.json");
     paths.push(
+      activePath,
       ...[
         "launcher.ts",
         "mcp.ts",
@@ -153,9 +179,11 @@ export async function activateInstalledRuntime(selected?: Registration) {
       JSON.stringify({ beforeActive, files: snapshots }),
     );
     try {
+      checkpoint();
       await installManagementCli(false, onWrite);
       const results = [];
       for (const { project } of plans) {
+        checkpoint();
         const result = await installProject(
           project.root,
           project.client,
@@ -166,20 +194,27 @@ export async function activateInstalledRuntime(selected?: Registration) {
         );
         results.push(result);
       }
+      checkpoint();
+      // Repeat discovery after config writes to include a reconnect racing with the preflight.
+      const stopping = new Map(processes.map((p) => [p.pid, p]));
+      for (const candidate of await ownedProcesses(present.map((p) => p.root)))
+        stopping.set(candidate.pid, candidate);
+      const stopped = await stopOwnedProcesses([...stopping.values()]);
+      checkpoint();
+      await activatePointer(runtimeRoot);
+      onWrite(activePath, await readFile(activePath, "utf8"));
+      // Bridges follow the pointer: an interruption must never leave the active root forwarding
+      // back to the launcher, which would make every launch start itself again.
       for (const bridge of bridges) {
+        checkpoint();
         const expected = snapshots.find((item) => item.path === bridge.path);
         if ((await readFile(bridge.path, "utf8")) !== expected?.before)
           throw new Error("Legacy runtime changed during activation; retry");
         await atomic(bridge.path, bridge.content);
         onWrite(bridge.path, bridge.content);
       }
-      // Repeat discovery after config writes to include a reconnect racing with the preflight.
-      const stopping = new Map(processes.map((p) => [p.pid, p]));
-      for (const candidate of await ownedProcesses(present.map((p) => p.root)))
-        stopping.set(candidate.pid, candidate);
-      const stopped = await stopOwnedProcesses([...stopping.values()]);
+      checkpoint();
       if (selected) await saveRegistration(selected);
-      await activatePointer(runtimeRoot);
       return {
         activated: { format: 1, root: runtimeRoot, version: manifest.version },
         stoppedProcesses: stopped,

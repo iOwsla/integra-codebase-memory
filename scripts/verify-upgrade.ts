@@ -23,7 +23,8 @@ const installer = resolve(runtimeRoot, "scripts/install-project.ts");
 const launch = async (entry: string, project: string) => {
   const child = spawn(
     process.execPath,
-    [entry, "mcp", "--project", project, "--auto-index", "--watch"],
+    // Exact installer arguments (install-project.ts, connect-codex.ts).
+    [entry, "mcp", "--project", project, "--auto-index", "--watch", "--session-projects"],
     { env, stdio: ["ignore", "pipe", "pipe"] },
   );
   children.push(child);
@@ -128,6 +129,11 @@ try {
   assert.equal(result.activated.version, version);
   assert.equal(result.projects.length, 2);
   assert(!alive(first) && !alive(second), "Old MCP processes should stop");
+  for (const child of [first, second])
+    assert(
+      result.stoppedProcesses.includes(child.pid),
+      "Activation must report the installer-format MCP processes it stopped",
+    );
   assert(alive(unrelated), "Unrelated Bun process must survive");
   for (const project of [a, b]) {
     const config = JSON.parse(await readFile(resolve(project, ".mcp.json"), "utf8"));

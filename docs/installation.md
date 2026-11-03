@@ -21,7 +21,7 @@ When OrbStack is installed, CodeMemory selects its `orbstack` context on macOS w
 
 Managed PostgreSQL data lives in a Docker volume on the selected engine. CodeMemory binds new service state to that engine and refuses to create a new empty volume when an initialized service's volume is missing. Select the original engine or restore its volume before retrying; changing Docker context does not migrate database data. Existing installations acquire an engine binding after a successful setup on the engine containing their labeled volume. To keep the existing data, back it up and migrate it before changing engines. To start an empty OrbStack index instead, run `codememory system setup --fresh-engine`; this archives the previous local credentials as `service.<instance>.json`, leaves the old Docker volume untouched, and creates a new index database. Reindex each selected project afterward. Existing CodeMemory memories are not copied into the fresh database.
 
-The managed PostgreSQL Compose service is limited to one CPU and 1 GiB of container memory. This limit applies when setup next recreates the container; it does not cap Docker Desktop or OrbStack itself, or the separate TypeScript parser process. Use project `exclude`/`.codememoryignore` patterns for known non-source output trees and keep one indexing job per project to reduce parser load.
+The managed PostgreSQL Compose service is limited to one CPU and 1 GiB of container memory. It runs with `max_wal_size=4GB`, `checkpoint_timeout=15min` and `wal_compression=lz4` so large index publications avoid forced mid-publish checkpoints; setup recreates the container when this definition changes and keeps the data volume. This limit applies when setup next recreates the container; it does not cap Docker Desktop or OrbStack itself, or the separate TypeScript parser process. Use project `exclude`/`.codememoryignore` patterns for known non-source output trees and keep one indexing job per project to reduce parser load.
 
 `projects add [path]` defaults to the current working directory when no path is supplied; it never expands to a parent Git root. For example, run `codememory projects add --client both` inside the project. `codememory index` and `projects remove --yes` also accept the current directory.
 
@@ -168,21 +168,29 @@ timer or silent background installation.
 
 Activation checks every existing registered project's recognizable connection
 before any process is stopped, then writes backups and shared launchers, migrates
-settings and switches the active pointer last. It preserves custom environment,
+settings and switches the active pointer, and only then redirects older release
+entries to the shared launcher. It preserves custom environment,
 timeouts and other servers. Existing runtimes are kept for recovery. A handled
 activation failure restores completed installer-owned writes when they have not
 been edited concurrently. `backupDirectory/rollback.json` records the original
 settings; per-project backup directories are also returned. Do not publish these
 private backups because client configuration can contain credentials.
 
-If activation is interrupted by a power loss or process termination, rerun the
+SIGINT, SIGTERM or SIGHUP during activation (for example Ctrl+C or the update
+timeout) rolls back at the next step boundary, including the active pointer and
+redirected entries, releases the lock and exits non-zero. If activation is
+interrupted by a power loss or process termination, rerun the
 bootstrap with `--upgrade` / `-Upgrade`. A lock owned by a dead PID is recoverable;
-a live updater blocks concurrent activation. During activation, new shared
-launchers refuse to start. If the first migration stops before an active pointer
+an empty lock older than 10 seconds is treated as stale; a live updater blocks
+concurrent activation. While a live updater holds the lock, new shared launchers
+refuse to start; a stale lock no longer blocks them. A launcher also refuses an
+active runtime entry that forwards back to the launcher instead of starting it again. If the first migration stops before an active pointer
 exists, invoke the downloaded bootstrap rather than the shared CLI to repair it.
 The CLI's normal exit must be observed before starting another update.
 
 Only Bun MCP commands with a registered exact project root, recognized entry,
+the installer flags (`--auto-index` and `--watch`, optionally `--session-projects`,
+in any order, nothing else),
 verified CodeMemory runtime origin/manifest and matching process creation identity
 are eligible for automatic stop. Parser workers require a matched parent and entry.
 The updater rechecks identities before termination; it never kills every Bun/Node
@@ -190,7 +198,9 @@ process or treats a PostgreSQL backend PID as an operating-system process ID.
 Unix uses TERM followed by KILL for processes that remain; Windows terminates the
 verified process. Uncommitted PostgreSQL transactions roll back on disconnect.
 Foreground manual indexing or customized/unregistered launchers may require closing
-that specific terminal/client first.
+that specific terminal/client first. An MCP process for a registered project that
+runs from an unverified checkout (for example a development clone) blocks the update
+until its client connection is closed.
 
 Reconnect open clients after success: the updater cannot force an editor to reload
 its cached MCP launch arguments. A client that keeps respawning a legacy cached

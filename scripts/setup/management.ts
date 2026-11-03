@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { CodeMemoryError } from "@codememory/core";
 import { PostgresStore } from "@codememory/database";
@@ -153,8 +154,16 @@ export function registerManagementCommands(cli: Command) {
     .action(async (path, options) => {
       if (!options.yes)
         throw new Error("Use --yes to disable this project. Close its running MCP session first.");
-      const root = resolve(path ?? process.cwd());
-      const selected = (await listRegistrations()).find((p) => p.root === root);
+      // Registrations store the canonical root; a deleted project can still be disabled by path.
+      // Config validation is skipped on purpose so it can never block a disable.
+      const resolved = resolve(path ?? process.cwd());
+      const root = await realpath(resolved).catch((e: NodeJS.ErrnoException) => {
+        if (e.code !== "ENOENT") throw e;
+        return resolved;
+      });
+      const selected = (await listRegistrations()).find(
+        (p) => p.root === root || p.root === resolved,
+      );
       if (!selected)
         throw new Error("Project is not registered; use projects list to select its exact path.");
       print(await saveRegistration({ ...selected, enabled: false }));
