@@ -169,8 +169,10 @@ export class PostgresIndexReader implements IndexReader {
   /** Direct callers plus calls made through an interface or base-class member the
    * symbol implements or overrides. Those rows carry `dispatch.via`: the receiver's
    * static type names the supertype member, so the runtime target may be another
-   * implementation. Member matching follows TypeScript structural rules: same name
-   * and static-ness on a declared IMPLEMENTS/EXTENDS ancestor. */
+   * implementation. Only instance members dispatch: constructors and static members
+   * keep their direct callers alone, and `super.member()` calls (edge metadata
+   * receiver "super") always run the base implementation. Members match by name on a
+   * declared IMPLEMENTS/EXTENDS ancestor. */
   private async callers(symbol: CodeSymbol, page: PageRequest) {
     const rows = await this.query<{
       data: Record<string, unknown>;
@@ -179,8 +181,9 @@ export class PostgresIndexReader implements IndexReader {
     }>(
       `
       WITH RECURSIVE anchor AS (
-        SELECT id, name, coalesce(data->>'static','false') AS static
-        FROM symbols WHERE repository_id=$1 AND id=$2
+        SELECT id, name FROM symbols
+        WHERE repository_id=$1 AND id=$2 AND data->>'kind'<>'CONSTRUCTOR'
+          AND coalesce(data->>'static','false')='false'
       ), supers(id, depth) AS (
         SELECT h.target_id, 1 FROM symbol_edges d
         JOIN symbol_edges h ON h.repository_id=d.repository_id AND h.source_id=d.source_id
@@ -199,11 +202,13 @@ export class PostgresIndexReader implements IndexReader {
         FROM (SELECT DISTINCT id FROM supers) s
         JOIN symbol_edges d ON d.repository_id=$1 AND d.source_id=s.id AND d.edge_type='DECLARES'
         JOIN symbols m ON m.repository_id=$1 AND m.id=d.target_id
-        JOIN anchor a ON m.name=a.name AND coalesce(m.data->>'static','false')=a.static AND m.id<>a.id
+        JOIN anchor a ON m.name=a.name AND m.id<>a.id
+        WHERE coalesce(m.data->>'static','false')='false' AND m.data->>'kind'<>'CONSTRUCTOR'
       )
       SELECT e.data, s.data AS symbol, t.via FROM targets t
       JOIN symbol_edges e ON e.repository_id=$1 AND e.target_id=t.id AND e.edge_type='CALLS'
       JOIN symbols s ON s.repository_id=e.repository_id AND s.id=e.source_id
+      WHERE t.via IS NULL OR e.data#>>'{metadata,receiver}' IS DISTINCT FROM 'super'
       ORDER BY s.data->>'file' COLLATE "C", (e.data->>'line')::int, e.id COLLATE "C" LIMIT $3 OFFSET $4`,
       [symbol.id, page.limit + 1, page.offset],
     );

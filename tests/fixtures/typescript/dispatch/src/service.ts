@@ -1,5 +1,5 @@
 import { Handler } from './handler';
-import { Base, CustomHandler, Static, StripeHandler } from './handlers';
+import { Base, Built, CustomHandler, Static, StripeHandler } from './handlers';
 export class Service {
   private readonly handlers: Record<string, Handler> = {};
   constructor(private readonly custom: CustomHandler) {}
@@ -9,4 +9,6 @@ export class Service {
   async viaPromise(load: () => Promise<Handler>) { return (await load()).verify('d'); }
   staticCall() { return Static.run(); }
   base(b: Base) { return b.run(); }
+  baseStatic() { return Base.make(); }
+  build() { return new Built(2); }
 }

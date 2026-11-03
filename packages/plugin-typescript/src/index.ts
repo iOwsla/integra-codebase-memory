@@ -185,6 +185,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
       type: string,
       line: number,
       resolution: "AST_CONFIRMED" | "SEMANTIC_CONFIRMED",
+      metadata?: Record<string, unknown>,
     ) => {
       result.edges.push({
         id: id(source.id, target.id, type, String(line)),
@@ -195,6 +196,7 @@ export class TypeScriptPlugin implements LanguagePlugin {
         resolution,
         fileId: source.fileId,
         line,
+        ...(metadata ? { metadata } : {}),
       });
     };
     // Most syntax nodes cannot declare a graph symbol. Avoid text extraction
@@ -461,7 +463,19 @@ export class TypeScriptPlugin implements LanguagePlugin {
                 ? node.expression.name
                 : node.expression,
             );
-            if (target) addEdge(callOwner, target, "CALLS", lineOf(node), "SEMANTIC_CONFIRMED");
+            // super.member() invokes exactly the base implementation; it never dispatches.
+            const nonvirtual =
+              ts.isPropertyAccessExpression(node.expression) &&
+              node.expression.expression.kind === ts.SyntaxKind.SuperKeyword;
+            if (target)
+              addEdge(
+                callOwner,
+                target,
+                "CALLS",
+                lineOf(node),
+                "SEMANTIC_CONFIRMED",
+                nonvirtual ? { receiver: "super" } : undefined,
+              );
             else unresolved(node, callOwner, "CALLS");
           }
           if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {

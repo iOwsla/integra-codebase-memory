@@ -275,16 +275,22 @@ async function call(name: string, args: Record<string, unknown>) {
     unknown
   >;
 }
+// The tools accept offsets up to this bound; anything beyond it cannot be read.
+const maxOffset = 100_000;
 async function all(name: string, args: Record<string, unknown>) {
   const rows: Record<string, unknown>[] = [];
   let offset = 0;
-  for (let page = 0; page < 50; page++) {
+  for (;;) {
     const r = await call(name, { ...args, limit: 100, offset });
     rows.push(...((r.results as Record<string, unknown>[]) ?? []));
-    if (!r.hasMore || typeof r.nextOffset !== "number") break;
+    if (!r.hasMore) return rows;
+    // Scoring a truncated page set would report unrequested rows as misses.
+    if (typeof r.nextOffset !== "number" || r.nextOffset > maxOffset)
+      throw new Error(
+        `${name} pagination exceeded offset ${maxOffset} for ${JSON.stringify(args)}`,
+      );
     offset = r.nextOffset;
   }
-  return rows;
 }
 const at = (row: Record<string, unknown>) => {
   const symbol = row.symbol as { file?: string } | undefined;
@@ -325,6 +331,7 @@ try {
     beyond100: 0,
     missing: 0,
     siblings: 0,
+    rankUnknown: 0,
   };
   const isTarget = (c: Candidate) => (r: Row) =>
     r.file === c.file &&
@@ -339,7 +346,7 @@ try {
     // Distinguish "ranked below the first page" from "absent"; extra pages are timed separately.
     // The server may reduce the page size, so always continue from nextOffset.
     let next = first.hasMore ? (first.nextOffset as number) : undefined;
-    while (rank < 0 && next !== undefined && next < 1000) {
+    while (rank < 0 && next !== undefined && next <= maxOffset) {
       const t = performance.now();
       const page = await client.callTool({
         name: "search_symbols",
@@ -359,6 +366,12 @@ try {
       if (found >= 0) rank = search.length + found;
       search.push(...rows);
       next = body?.hasMore ? body.nextOffset : undefined;
+    }
+    if (rank < 0 && next !== undefined) {
+      // Unread result pages remain: the rank is unknown, not evidence of absence.
+      totals.rankUnknown++;
+      items.push({ ...c, pos: undefined, rankUnknown: true, oracleRefs: oracle.length });
+      continue;
     }
     if (rank < 0) {
       totals.missing++;
@@ -409,7 +422,10 @@ try {
   }
 
   // Repeated mixed workload for steady-state latency.
-  const resolved = items.filter((i) => !i.missing) as { name: string; file: string }[];
+  const resolved = items.filter((i) => !i.missing && !i.rankUnknown) as {
+    name: string;
+    file: string;
+  }[];
   for (const item of Array.from(
     { length: resolved.length ? iterations : 0 },
     (_, i) => resolved[i % resolved.length] as { name: string; file: string },
@@ -431,6 +447,7 @@ try {
     await call("search_code", { query: item.name, limit: 20 });
   }
 
+  const ranked = sample.length - totals.missing - totals.rankUnknown;
   const report = {
     project: root,
     tsconfig: rel(tsconfig),
@@ -454,9 +471,10 @@ try {
     },
     quality: {
       symbolMissingPct: ratio(totals.missing, sample.length),
-      searchTop1Pct: ratio(totals.rank1, sample.length - totals.missing),
-      searchTop5Pct: ratio(totals.rank5, sample.length - totals.missing),
-      searchBeyond100Pct: ratio(totals.beyond100, sample.length - totals.missing),
+      searchRankUnknownPct: ratio(totals.rankUnknown, sample.length),
+      searchTop1Pct: ratio(totals.rank1, ranked),
+      searchTop5Pct: ratio(totals.rank5, ranked),
+      searchBeyond100Pct: ratio(totals.beyond100, ranked),
       callerRecallPct: ratio(totals.call[0], totals.call[1]),
       instantiationRecallPct: ratio(totals.new[0], totals.new[1]),
       useRecallPct: ratio(totals.use[0], totals.use[1]),
