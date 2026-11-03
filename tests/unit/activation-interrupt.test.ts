@@ -19,10 +19,26 @@ vi.mock("../../scripts/setup/cli-state", async (importOriginal) => {
     },
   };
 });
+const fsHook = vi.hoisted(() => ({ statError: undefined as NodeJS.ErrnoException | undefined }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    statSync: ((...args: Parameters<typeof actual.statSync>) => {
+      if (fsHook.statError) throw fsHook.statError;
+      return actual.statSync(...args);
+    }) as typeof actual.statSync,
+  };
+});
 const { activateInstalledRuntime, updateLock } = await import("../../scripts/setup/activation");
+const { withInterruptSignal } = await import("../../scripts/setup/interrupt");
+const { activateUpgrade } = await import("../../scripts/install-project");
+const { updateLockMessage } = await import("../../scripts/runtime-launcher");
 
 afterEach(() => {
   hook.afterAtomic = undefined;
+  fsHook.statError = undefined;
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
 const exists = (path: string) =>
@@ -84,6 +100,67 @@ it("rolls back the pointer and bridges when interrupted after the first bridge w
       activateInstalledRuntime(undefined, { signal: controller.signal }),
     ).rejects.toThrow("Activation interrupted");
     await expectRolledBack(state);
+  } finally {
+    await f.dispose();
+  }
+});
+
+const interruptSignals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+const listenerCounts = () => interruptSignals.map((s) => process.listenerCount(s));
+
+it("withInterruptSignal turns a signal into a rollback and removes its handlers", async () => {
+  const f = await fixture({});
+  try {
+    const state = await managedState(f.root);
+    vi.stubEnv("CODEMEMORY_SERVICE_DIR", state.service);
+    const before = listenerCounts();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    hook.afterAtomic = (path) => {
+      if (path.startsWith(state.roots[0] ?? "")) process.emit("SIGINT", "SIGINT");
+    };
+    const outcome = await withInterruptSignal((signal) =>
+      activateInstalledRuntime(undefined, { signal }),
+    );
+    expect(outcome).toMatchObject({ ok: false, aborted: true });
+    expect(outcome.ok ? undefined : String(outcome.error)).toContain("Activation interrupted");
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining("rolling back"));
+    expect(listenerCounts()).toEqual(before);
+    await expectRolledBack(state);
+  } finally {
+    await f.dispose();
+  }
+});
+
+it("the install-project upgrade activation receives the interrupt signal", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const before = listenerCounts();
+  let received: AbortSignal | undefined;
+  const outcome = await activateUpgrade(
+    { root: "/project", client: "codex", managed: false, enabled: true },
+    async (_selected, options) => {
+      received = options?.signal;
+      expect(listenerCounts()).toEqual(before.map((count) => count + 1));
+      process.emit("SIGTERM", "SIGTERM");
+      throw new Error("Activation interrupted");
+    },
+  );
+  expect(received?.aborted).toBe(true);
+  expect(outcome).toMatchObject({ ok: false, aborted: true });
+  expect(listenerCounts()).toEqual(before);
+});
+
+it("launcher treats a lock removed between its read and stat as gone", async () => {
+  const f = await fixture({});
+  try {
+    const lock = resolve(f.root, "update.lock");
+    await writeFile(lock, "");
+    expect(updateLockMessage(lock)).toContain("being written");
+    fsHook.statError = Object.assign(new Error("ENOENT: no such file or directory, stat"), {
+      code: "ENOENT",
+    });
+    expect(updateLockMessage(lock)).toBeNull();
+    fsHook.statError = Object.assign(new Error("EACCES"), { code: "EACCES" });
+    expect(() => updateLockMessage(lock)).toThrow("EACCES");
   } finally {
     await f.dispose();
   }

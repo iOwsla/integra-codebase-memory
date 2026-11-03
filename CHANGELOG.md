@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ctrl+C, SIGTERM or SIGHUP during a bootstrap upgrade (`install.sh` / `install-project.ts --write --upgrade`) now rolls back project configs and the management CLI at the next step and releases the update lock, like `codememory update`; the installer exits with code 130.
+- The runtime launcher no longer fails with a raw `ENOENT` error when an empty update lock is removed between its read and its age check; the launch proceeds.
 - Migration 11 drops the foreign keys and primary key of `symbol_edges`. Publication now deletes edges of removed symbols itself, matching the former cascade. On 300k real edges this raised edge insert throughput 2.3-2.5x and halved WAL volume.
 - Record the receiver's static class/interface on call edges (`receiverType`) and keep a `find_callers` dispatch row only when that type is an ancestor of the queried member. Calls on a sibling subclass that inherits the base member are no longer reported as possible callers of an override. The analyzer version changes, so existing indexes re-analyze once.
 - evaluate-project: exclude `this` keyword matches and inherited-member calls on sibling receivers from the language-service oracle.
