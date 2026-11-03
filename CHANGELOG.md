@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Reuse parsed and bound TypeScript source files across tsconfig programs whose parse- and bind-affecting options match, so shared workspace packages are no longer re-parsed for every app that imports them. Files used only by their own program are released when it finishes. Analysis output is unchanged.
+
 ## 0.1.0-alpha.34 — 2026-11-03
 
 - Load TypeScript standard-library declarations (`lib.d.ts` and `lib.*.d.ts`) from CodeMemory's own TypeScript package during analysis. Member calls through `Record`, `Promise` and other built-in generics now resolve instead of being recorded as unresolved; library declarations are never indexed. The analyzer version changes, so existing indexes re-analyze once.
