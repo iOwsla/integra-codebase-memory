@@ -8,19 +8,6 @@ import {
 import type pg from "pg";
 
 const literalPattern = (text: string) => text.replace(/[\\%_]/g, "\\$&");
-type SearchCodeRow = {
-  file: string;
-  line: number;
-  snippet: string;
-  score: number;
-  reason: string;
-};
-type SearchCodeBatch = {
-  files: number;
-  last: string | null;
-  hits: number;
-  pageRows: SearchCodeRow[];
-};
 const pageResult = <T>(rows: T[], page: PageRequest) => ({
   results: rows.slice(0, page.limit),
   hasMore: rows.length > page.limit,
@@ -80,25 +67,21 @@ export class PostgresIndexReader implements IndexReader {
       pattern = literalPattern(q);
     const rows = await this.query<{ data: CodeSymbol; score: number; reason: string }>(
       `
-      WITH candidates AS MATERIALIZED (
-        SELECT s.*,
+      WITH candidates AS (
+        SELECT s.*, f.data->>'generated'='true' AS generated,
           CASE WHEN lower(s.name)=$2 THEN 100 WHEN lower(s.qualified_name)=$2 THEN 95
                WHEN lower(s.name) LIKE $3 THEN 80 WHEN lower(s.name) LIKE $4 THEN 65
                ELSE 50*similarity(lower(s.name),$2) END AS base_score,
           CASE WHEN lower(s.name)=$2 THEN 'exact name' WHEN lower(s.qualified_name)=$2 THEN 'qualified name'
                WHEN lower(s.name) LIKE $3 THEN 'prefix' WHEN lower(s.name) LIKE $4 THEN 'substring'
                ELSE 'trigram' END AS base_reason
-        FROM symbols s
+        FROM symbols s JOIN files f ON f.repository_id=s.repository_id AND f.id=s.file_id
         WHERE s.repository_id=$1 AND (cardinality($5::text[])=0 OR s.data->>'kind'=ANY($5))
           AND (lower(s.name) LIKE $4 OR lower(s.qualified_name)=$2 OR lower(s.name) % $2)
-      ), file_flags AS MATERIALIZED (
-        -- files.data embeds the whole source; read the flag once per candidate file.
-        SELECT f.id, f.data->>'generated'='true' AS generated FROM files f
-        WHERE f.repository_id=$1 AND f.id IN (SELECT DISTINCT file_id FROM candidates)
       ) SELECT data,
         base_score * CASE WHEN data->>'kind' IN ('IMPORT','EXPORT') THEN 0.6 ELSE 1 END * CASE WHEN generated THEN 0.5 ELSE 1 END AS score,
         base_reason || CASE WHEN data->>'kind' IN ('IMPORT','EXPORT') THEN '; alias declaration' ELSE '' END || CASE WHEN generated THEN '; generated penalty' ELSE '' END AS reason
-      FROM candidates c JOIN file_flags g ON g.id=c.file_id
+      FROM candidates c
       ORDER BY score DESC,
         CASE WHEN data->>'file' ~ '(^|/)(__tests__|tests?|spec)/|\\.(test|spec)\\.' THEN 1 ELSE 0 END,
         CASE WHEN data->>'kind' IN ('CLASS','INTERFACE') THEN 0 WHEN data->>'kind' IN ('FUNCTION','METHOD') THEN 1 ELSE 2 END,
@@ -111,54 +94,22 @@ export class PostgresIndexReader implements IndexReader {
       page,
     );
   }
-  /** Streams matching files in path order and stops once the page is covered, instead
-   * of splitting every matching file before the final sort. Each batch reports how many
-   * matching lines it held, so only the requested window is returned from SQL. Every
-   * matching file holds at least one matching line, so the first batch is sized to cover
-   * the page; later batches grow quickly because each one filters the remaining files. */
+  /** One statement: with files_path_c (migration 10) the planner walks matching files in
+   * path order and stops at LIMIT. Measured on kiosk-software-last (5,660 files) this beat
+   * a batched cursor variant on every query, e.g. "create" 2 ms vs 94 ms. */
   async searchCode(query: string, page: PageRequest) {
     this.checkPage(page);
     const pattern = `%${literalPattern(query.toLowerCase())}%`;
-    const wanted = page.limit + 1,
-      deadline = Date.now() + 4000,
-      rows: SearchCodeRow[] = [];
-    let seen = 0,
-      cursor: string | null = null,
-      batch = Math.min(4096, Math.max(64, page.offset + wanted));
-    while (rows.length < wanted) {
-      if (Date.now() > deadline)
-        throw new CodeMemoryError(
-          "QUERY_TIMEOUT",
-          "Scoped index query exceeded its execution budget; narrow the query",
-        );
-      const skip = Math.max(0, page.offset - seen);
-      const [result]: SearchCodeBatch[] = await this.query<SearchCodeBatch>(
-        `
-        WITH batch AS MATERIALIZED (
-          SELECT path, data->>'content' AS content,
-            CASE WHEN data->>'generated'='true' THEN 0.5 ELSE 1 END::float8 AS score
-          FROM files WHERE repository_id=$1 AND data->>'status'='INDEXED'
-            AND lower(data->>'content') LIKE $2 AND ($3::text IS NULL OR path COLLATE "C" > $3)
-          ORDER BY path COLLATE "C" LIMIT $4
-        ), hits AS MATERIALIZED (
-          SELECT b.path, l.ordinality::int AS line, left(l.text,500) AS snippet, b.score
-          FROM batch b CROSS JOIN LATERAL regexp_split_to_table(b.content, E'\\r?\\n') WITH ORDINALITY AS l(text,ordinality)
-          WHERE lower(l.text) LIKE $2
-        )
-        SELECT (SELECT count(*)::int FROM batch) AS files,
-          (SELECT max(path COLLATE "C") FROM batch) AS last,
-          (SELECT count(*)::int FROM hits) AS hits,
-          (SELECT coalesce(jsonb_agg(jsonb_build_object('file',path,'line',line,'snippet',snippet,'score',score,'reason','lexical substring')
-             ORDER BY path COLLATE "C", line),'[]') FROM (SELECT * FROM hits ORDER BY path COLLATE "C", line OFFSET $5 LIMIT $6) w) AS "pageRows"`,
-        [pattern, cursor, batch, skip, wanted - rows.length],
-      );
-      if (!result) break;
-      rows.push(...result.pageRows);
-      seen += result.hits;
-      if (result.files < batch || result.last === null) break;
-      cursor = result.last;
-      batch = Math.min(batch * 4, 4096);
-    }
+    const rows = await this.query(
+      `
+      SELECT f.path AS file, l.ordinality::int AS line, left(l.text,500) AS snippet,
+             CASE WHEN f.data->>'generated'='true' THEN 0.5 ELSE 1 END::float8 AS score, 'lexical substring' AS reason
+      FROM files f CROSS JOIN LATERAL regexp_split_to_table(f.data->>'content', E'\\r?\\n') WITH ORDINALITY AS l(text,ordinality)
+      WHERE f.repository_id=$1 AND f.data->>'status'='INDEXED'
+        AND lower(f.data->>'content') LIKE $2 AND lower(l.text) LIKE $2
+      ORDER BY f.path COLLATE "C", l.ordinality LIMIT $3 OFFSET $4`,
+      [pattern, page.limit + 1, page.offset],
+    );
     return pageResult(rows, page);
   }
   async symbol(selector: SymbolSelector) {

@@ -201,16 +201,6 @@ describe("search_code streaming", () => {
         await legacySearchCode("code", query, limit, offset),
       );
     }
-    const spy = vi.spyOn(client, "query");
-    try {
-      // Content-only matches leave the first batch short, so later batches continue
-      // from the path cursor with the remaining offset.
-      const page = await reader("code").searchCode("create\r", { limit: 20, offset: 1500 });
-      expect(page.results).toHaveLength(20);
-      expect(spy.mock.calls.length).toBeGreaterThan(1);
-    } finally {
-      spy.mockRestore();
-    }
     const first = await reader("code").searchCode("create", { limit: 20, offset: 0 });
     expect(first.results).toHaveLength(20);
     expect(first.hasMore).toBe(true);

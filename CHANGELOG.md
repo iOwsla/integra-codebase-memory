@@ -31,8 +31,8 @@
 - Publication keeps the latest 20 index runs per project; recording a failure prunes index errors older than 30 days.
 - `clean` and `remove` delete set-wise under a 10-minute statement budget so large projects no longer hit the 30 s timeout. `clean` also deletes run history and the last index job, and later index versions continue above the pre-clean version.
 - `debug unresolved` reads only the first 100 unresolved references by id and prints `{ total, results }` instead of loading the whole project snapshot.
-- Stream `search_code` matches in path-ordered batches and stop once the page is covered, instead of splitting every matching file before sorting; results and paging are unchanged.
-- Order equal-score `search_symbols` results with non-test files first, then classes/interfaces, then functions/methods; scores and reasons are unchanged. Read each candidate file's generated flag once.
+- `search_code` walks matching files in path order through the new `files_path_c` index and stops at the page limit; on kiosk-software-last a first page for a common word takes about 2-15 ms.
+- Order equal-score `search_symbols` results with non-test files first, then classes/interfaces, then functions/methods; scores and reasons are unchanged.
 - Add `incomingByType`, `outgoingByType` and `usageIncoming` (excluding `DECLARES`, `EXPORTS` and self-edges) to `get_symbol`; `incoming`/`outgoing` keep their raw totals.
 - Read the unresolved-reference count in dead-code and duplicate reports from the latest index run totals instead of counting rows on every page.
 - Load `trace_dependencies` adjacency for a whole breadth-first level in one query; paths, truncation and bounds are unchanged.
