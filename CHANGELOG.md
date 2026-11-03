@@ -38,6 +38,7 @@
 - Keep scanning when a directory or config file disappears mid-scan (counted as `CONFIG_VANISHED`) or `.gitignore` is symlinked outside the root (`IGNORE_FILE_OUT_OF_SCOPE`). An unreadable directory now fails with `SCAN_UNREADABLE_DIRECTORY` naming its relative path.
 - Index source files that contain a literal NUL byte instead of skipping them as binary; the NUL is stored as a space. Files with a UTF-16 BOM, mostly-NUL content or invalid UTF-8 with NULs are still skipped.
 - Skip the repeated nested-repository ancestor check for files the scanner already vetted while walking, reducing per-file filesystem calls.
+- Reuse parsed and bound TypeScript source files across tsconfig programs whose parse- and bind-affecting options match, so shared workspace packages are no longer re-parsed for every app that imports them. A scanner-only import pre-pass predicts which groups use each file, so a cached file is released after the last group that needs it, and the source text retained between groups is capped at 32 MiB. Analysis output is unchanged.
 
 ## 0.1.0-alpha.34 — 2026-11-03
 
