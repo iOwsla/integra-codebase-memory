@@ -35,7 +35,7 @@ export interface ParserProfileEvent {
 /** Compiler input is an in-memory allowlist produced by the bounded scanner. */
 export class TypeScriptPlugin implements LanguagePlugin {
   readonly id = "typescript";
-  readonly version = `9:prisma2:${ts.version}`;
+  readonly version = `10:prisma2:${ts.version}`;
   readonly configurationReferences = configurationReferences;
   readonly extensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts", ".prisma"];
   constructor(
@@ -392,6 +392,18 @@ export class TypeScriptPlugin implements LanguagePlugin {
         }
         return;
       };
+      // A single indexed class/interface behind the receiver expression; unions,
+      // intersections and external types stay unknown so dispatch remains possible.
+      const receiverType = (expression: ts.Expression) => {
+        const type = checker.getTypeAtLocation(expression);
+        if (type.isUnionOrIntersection()) return;
+        for (const d of type.getSymbol()?.declarations ?? []) {
+          if (!ts.isClassLike(d) && !ts.isInterfaceDeclaration(d)) continue;
+          const found = getDeclaration(d);
+          if (found) return { receiverType: found.id };
+        }
+        return;
+      };
       for (const path of roots) {
         const sf = program.getSourceFile(path),
           root = fileSymbols.get(path);
@@ -464,18 +476,16 @@ export class TypeScriptPlugin implements LanguagePlugin {
                 : node.expression,
             );
             // super.member() invokes exactly the base implementation; it never dispatches.
-            const nonvirtual =
-              ts.isPropertyAccessExpression(node.expression) &&
-              node.expression.expression.kind === ts.SyntaxKind.SuperKeyword;
+            // Otherwise record the receiver's static class/interface so dispatch queries
+            // can rule out overrides the receiver type cannot reach.
+            const callee = node.expression;
+            const metadata = !ts.isPropertyAccessExpression(callee)
+              ? undefined
+              : callee.expression.kind === ts.SyntaxKind.SuperKeyword
+                ? { receiver: "super" }
+                : receiverType(callee.expression);
             if (target)
-              addEdge(
-                callOwner,
-                target,
-                "CALLS",
-                lineOf(node),
-                "SEMANTIC_CONFIRMED",
-                nonvirtual ? { receiver: "super" } : undefined,
-              );
+              addEdge(callOwner, target, "CALLS", lineOf(node), "SEMANTIC_CONFIRMED", metadata);
             else unresolved(node, callOwner, "CALLS");
           }
           if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {

@@ -172,7 +172,9 @@ export class PostgresIndexReader implements IndexReader {
    * implementation. Only instance members dispatch: constructors and static members
    * keep their direct callers alone, and `super.member()` calls (edge metadata
    * receiver "super") always run the base implementation. Members match by name on a
-   * declared IMPLEMENTS/EXTENDS ancestor. */
+   * declared IMPLEMENTS/EXTENDS ancestor. When the call edge records the receiver's
+   * static type, it must itself be one of those ancestors: a sibling subclass that
+   * merely inherits the base member can never be an instance of this class. */
   private async callers(symbol: CodeSymbol, page: PageRequest) {
     const rows = await this.query<{
       data: Record<string, unknown>;
@@ -208,7 +210,10 @@ export class PostgresIndexReader implements IndexReader {
       SELECT e.data, s.data AS symbol, t.via FROM targets t
       JOIN symbol_edges e ON e.repository_id=$1 AND e.target_id=t.id AND e.edge_type='CALLS'
       JOIN symbols s ON s.repository_id=e.repository_id AND s.id=e.source_id
-      WHERE t.via IS NULL OR e.data#>>'{metadata,receiver}' IS DISTINCT FROM 'super'
+      WHERE t.via IS NULL OR (
+        e.data#>>'{metadata,receiver}' IS DISTINCT FROM 'super'
+        AND (e.data#>>'{metadata,receiverType}' IS NULL
+          OR e.data#>>'{metadata,receiverType}' IN (SELECT id FROM supers)))
       ORDER BY s.data->>'file' COLLATE "C", (e.data->>'line')::int, e.id COLLATE "C" LIMIT $3 OFFSET $4`,
       [symbol.id, page.limit + 1, page.offset],
     );

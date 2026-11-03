@@ -338,11 +338,17 @@ it("lists interface and base-class dispatch callers with their supertype member"
       ["Service.viaUnion", 7, null],
       ["Service.viaPromise", 9, null],
     ]);
-    // super.run() is a direct base call, never a dispatch caller of the override.
-    expect(await callers("Sub.run")).toEqual([["Service.base", 11, "Base.run"]]);
+    // super.run() is a direct base call, never a dispatch caller of the override; a
+    // Sibling receiver inherits Base.run but can never be a Sub, while `this` in Base can.
+    expect(await callers("Sub.run")).toEqual([
+      ["Base.twice", 8, "Base.run"],
+      ["Service.base", 11, "Base.run"],
+    ]);
     expect(await callers("Base.run")).toEqual([
+      ["Base.twice", 8, null],
       ["Sub.run", 9, null],
       ["Service.base", 11, null],
+      ["Service.sibling", 14, null],
     ]);
     // Static members and constructors keep only their direct callers.
     expect(await callers("Static.run")).toEqual([["Service.staticCall", 10, null]]);
