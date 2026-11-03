@@ -36,7 +36,25 @@ it("skips a directory removed between listing and recursion", async () => {
   }
 });
 
-it("reports a .gitignore symlinked outside the root and continues", async () => {
+const ignoreGap = (scan: { exclusions?: unknown }, path: string) => {
+  const exclusions = scan.exclusions as {
+    other: number;
+    files: number;
+    byReason: Record<string, { files: number; directories: number; other: number }>;
+    diagnostics?: { reason: string; path: string; message: string }[];
+  };
+  expect(exclusions.byReason.IGNORE_FILE_OUT_OF_SCOPE).toEqual({
+    files: 0,
+    directories: 0,
+    other: 1,
+  });
+  expect(exclusions.diagnostics).toEqual([
+    expect.objectContaining({ reason: "IGNORE_FILE_OUT_OF_SCOPE", path }),
+  ]);
+  expect(exclusions.diagnostics?.[0]?.message).toContain("rules were not applied");
+};
+
+it("reports a .gitignore symlinked outside the root as an unapplied rule set", async () => {
   const a = await fixture({ "main.ts": "export const a=1" }),
     b = await fixture({ "rules.txt": "main.ts\n" });
   try {
@@ -44,12 +62,90 @@ it("reports a .gitignore symlinked outside the root and continues", async () => 
     const c = await createProjectContext(a.root);
     const read: string[] = [];
     const scan = await new RepositoryScanner((_event, path) => read.push(path)).scan(c);
-    expect(scan.exclusions.byReason.IGNORE_FILE_OUT_OF_SCOPE).toMatchObject({ files: 1 });
+    // Git does not follow a symlinked .gitignore either; the gap is reported, not hidden.
+    ignoreGap(scan, ".gitignore");
+    expect(scan.configs.has(".gitignore")).toBe(false);
     expect(scan.files.map((file) => file.path)).toEqual(["main.ts"]);
     expect(read.every((path) => !path.startsWith(b.root))).toBe(true);
   } finally {
     await a.dispose();
     await b.dispose();
+  }
+});
+
+it("reports a dangling .gitignore symlink the same way", async () => {
+  const a = await fixture({ "main.ts": "export const a=1", "sub/x.ts": "export const x=1" });
+  try {
+    await symlink(resolve(a.root, "missing-rules.txt"), resolve(a.root, "sub/.gitignore"));
+    const c = await createProjectContext(a.root);
+    const scan = await new RepositoryScanner().scan(c);
+    ignoreGap(scan, "sub/.gitignore");
+    expect(scan.files.map((file) => file.path)).toEqual(["main.ts", "sub/x.ts"]);
+  } finally {
+    await a.dispose();
+  }
+});
+
+it("fails closed on a .codememoryignore symlinked outside the root", async () => {
+  const a = await fixture({ "main.ts": "export const a=1" }),
+    b = await fixture({ "rules.txt": "main.ts\n" });
+  try {
+    await symlink(resolve(b.root, "rules.txt"), resolve(a.root, ".codememoryignore"));
+    const c = await createProjectContext(a.root);
+    const read: string[] = [];
+    await expect(
+      new RepositoryScanner((_event, path) => read.push(path)).scan(c),
+    ).rejects.toMatchObject({ code: "IGNORE_FILE_OUT_OF_SCOPE" });
+    expect(read.every((path) => !path.startsWith(b.root))).toBe(true);
+  } finally {
+    await a.dispose();
+    await b.dispose();
+  }
+});
+
+it("fails closed on a dangling .codememoryignore symlink", async () => {
+  const a = await fixture({ "main.ts": "export const a=1" });
+  try {
+    await symlink(resolve(a.root, "missing-rules.txt"), resolve(a.root, ".codememoryignore"));
+    const c = await createProjectContext(a.root);
+    await expect(new RepositoryScanner().scan(c)).rejects.toMatchObject({
+      code: "IGNORE_FILE_OUT_OF_SCOPE",
+    });
+  } finally {
+    await a.dispose();
+  }
+});
+
+it("does not apply a .gitignore symlinked into a nested repository", async () => {
+  const a = await fixture({
+    "main.ts": "export const a=1",
+    "nested/.git": "",
+    "nested/.gitignore": "main.ts\n",
+  });
+  try {
+    await symlink(resolve(a.root, "nested/.gitignore"), resolve(a.root, ".gitignore"));
+    const c = await createProjectContext(a.root);
+    const scan = await new RepositoryScanner().scan(c);
+    ignoreGap(scan, ".gitignore");
+    expect(scan.configs.has("nested/.gitignore")).toBe(false);
+    expect(scan.configs.has(".gitignore")).toBe(false);
+    expect(scan.files.map((file) => file.path)).toEqual(["main.ts"]);
+  } finally {
+    await a.dispose();
+  }
+});
+
+it("applies an in-root symlinked .gitignore under its walked path", async () => {
+  const a = await fixture({ "main.ts": "export const a=1", "shared/rules.txt": "main.ts\n" });
+  try {
+    await symlink(resolve(a.root, "shared/rules.txt"), resolve(a.root, ".gitignore"));
+    const c = await createProjectContext(a.root);
+    const scan = await new RepositoryScanner().scan(c);
+    expect(scan.configs.get(".gitignore")).toBe("main.ts\n");
+    expect(scan.configs.has("shared/rules.txt")).toBe(false);
+    expect(scan.files.map((file) => file.path)).toEqual([]);
+  } finally {
+    await a.dispose();
   }
 });
 
@@ -118,6 +214,54 @@ it("still rejects a listed file replaced by an out-of-root symlink before it is 
   } finally {
     await a.dispose();
     await b.dispose();
+  }
+});
+
+it("rejects a directory swapped mid-scan for a symlink into a nested repository", async () => {
+  const f = await fixture({
+    "a.ts": "export const a=1",
+    "nested/.git": "",
+    "nested/src/secret.ts": "export const secret=1",
+    "z/secret.ts": "export const z=1",
+  });
+  try {
+    // The walk skips nested/ as NESTED_REPOSITORY, so only the swap can reach it.
+    const c = await createProjectContext(f.root);
+    const z = resolve(c.canonicalRoot, "z"),
+      nested = resolve(c.canonicalRoot, "nested");
+    const read: string[] = [];
+    const scanner = new RepositoryScanner((event, path) => {
+      if (event !== "scan") read.push(path);
+      // The root listing already holds z/ as a regular directory when it is swapped.
+      if (event === "read" && path.endsWith("/a.ts")) {
+        rmSync(z, { recursive: true });
+        symlinkSync(resolve(nested, "src"), z);
+      }
+    });
+    await expect(scanner.scan(c)).rejects.toMatchObject({ code: "PATH_OUT_OF_SCOPE" });
+    expect(read.every((path) => !path.startsWith(nested))).toBe(true);
+  } finally {
+    await f.dispose();
+  }
+});
+
+it("runs the nested-repository walk for a vetted path resolved through a symlink", async () => {
+  const f = await fixture({
+    "main.ts": "export const a=1",
+    "nested/.git": "",
+    "nested/src/secret.ts": "export const secret=1",
+  });
+  try {
+    await symlink(resolve(f.root, "nested/src"), resolve(f.root, "links"));
+    const c = await createProjectContext(f.root);
+    await expect(safePath(c, "links/secret.ts", { ancestorsVetted: true })).rejects.toMatchObject({
+      code: "PATH_OUT_OF_SCOPE",
+    });
+    await expect(safePath(c, "main.ts", { ancestorsVetted: true })).resolves.toBe(
+      resolve(c.canonicalRoot, "main.ts"),
+    );
+  } finally {
+    await f.dispose();
   }
 });
 

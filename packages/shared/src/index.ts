@@ -53,7 +53,8 @@ export function forbidden(path: string): boolean {
 /**
  * Resolve a project path and reject it if it escapes the root, is protected or sits in
  * a nested repository. `ancestorsVetted` skips only the ancestor `.git` walk for callers
- * (the scanner) that already checked every directory on the way down.
+ * (the scanner) that already checked every directory on the way down, and only when
+ * no symlink was followed.
  */
 export async function safePath(
   context: ProjectContext,
@@ -74,7 +75,8 @@ export async function safePath(
     forbidden(relative(context.canonicalRoot, actual))
   )
     throw new CodeMemoryError("PATH_OUT_OF_SCOPE", "Path is outside the permitted source scope");
-  if (options.ancestorsVetted) return actual;
+  // A path resolved through a symlink has different ancestors from the walked ones.
+  if (options.ancestorsVetted && actual === candidate) return actual;
   let dir = resolve(actual, "..");
   while (contains(context.canonicalRoot, dir) && dir !== context.canonicalRoot) {
     if (
