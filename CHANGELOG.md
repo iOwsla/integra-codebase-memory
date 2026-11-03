@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Reuse parsed and bound TypeScript source files across tsconfig programs whose parse- and bind-affecting options match, so shared workspace packages are no longer re-parsed for every app that imports them. Files used only by their own program are released when it finishes. Analysis output is unchanged.
+- Reuse parsed and bound TypeScript source files across tsconfig programs whose parse- and bind-affecting options match, so shared workspace packages are no longer re-parsed for every app that imports them. A scanner-only import pre-pass predicts which groups use each file, so a cached file is released after the last group that needs it, and the source text retained between groups is capped at 32 MiB. Analysis output is unchanged.
 
 ## 0.1.0-alpha.34 — 2026-11-03
 
