@@ -29,7 +29,7 @@ import { registerProviderCommands } from "./providers";
 const cli = new Command()
   .name("codememory")
   .description("Local, explicitly project-scoped code intelligence")
-  .version("0.1.0-alpha.36")
+  .version("0.1.0-alpha.37")
   .enablePositionalOptions();
 registerManagementCommands(cli);
 registerProviderCommands(cli);
