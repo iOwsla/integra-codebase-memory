@@ -20,6 +20,7 @@ import {
   GitCli,
   hash,
   id,
+  log,
   runtimeInfo,
 } from "@codememory/shared";
 import picomatch from "picomatch";
@@ -77,11 +78,43 @@ const reviewsOutput = z
   })
   .strict();
 const code = (e: unknown) => (e instanceof CodeMemoryError ? e.code : "HISTORY_READ_ERROR");
+/** Object-bound outcomes that a repeated history walk reproduces; they do not block incremental collection. */
+const nonBlockingGaps = new Set([
+  "SKIPPED_BINARY",
+  "SKIPPED_TOO_LARGE",
+  "UNSUPPORTED_SOURCE",
+  "UNSUPPORTED_ENCODING",
+  "GENERATED",
+]);
+const commitPageSize = 1000;
+const jobRetentionDays = 7;
+/** Old jobs deleted per collection start, so a large legacy backlog drains over several runs. */
+const jobPruneChunk = 1000;
+interface QueryContext {
+  current: { head: string | null; branch: string | null };
+  hashes: Map<string, Promise<string>>;
+  ancestry: Map<string, Promise<boolean | null>>;
+}
 /** Deterministic evidence collection is independent of conversation processing and model opt-in. */
 export class HistoryService {
   private readonly git = new GitCli();
   private nextAutomaticAt = 0;
   private batchExcerptBytes: number | undefined;
+  // Per-job snapshots keyed by job, captured HEAD and policy generation; a restart recomputes them.
+  private documentListing?: { key: string; paths: string[]; digest: string; exclusions: unknown };
+  private wipSnapshot?: {
+    key: string;
+    paths: string[];
+    files: Set<string>;
+    head: Map<string, string[]>;
+    pathsHash: string;
+  };
+  private commitPage?: { key: string; start: number; ids: string[] };
+  private currentCommit?: {
+    key: string;
+    meta: Awaited<ReturnType<GitCli["commit"]>>;
+    changes: Map<number, GitChange[]>;
+  };
   constructor(
     readonly context: ProjectContext,
     private readonly projectStore: ProjectStore,
@@ -165,20 +198,22 @@ export class HistoryService {
       ],
     };
   }
-  private eligible(path: string) {
-    // Git history can contain paths excluded from the current source policy.
-    // Skip these collection candidates; explicit query paths still fail closed.
-    try {
-      this.path(path);
-    } catch (error) {
-      if (error instanceof CodeMemoryError && error.code === "PATH_OUT_OF_SCOPE") return false;
-      throw error;
-    }
+  /** Builds the source policy once per collection step so ignore rules and globs are reused. */
+  private eligibility() {
+    const excluded = watchPolicy(this.context);
     const include = this.context.effectiveConfig.include;
-    return (
-      !watchPolicy(this.context)(resolve(this.context.canonicalRoot, path)) &&
-      (!include.length || picomatch([...include])(path))
-    );
+    const included = include.length ? picomatch([...include]) : () => true;
+    return (path: string) => {
+      // Git history can contain paths excluded from the current source policy.
+      // Skip these collection candidates; explicit query paths still fail closed.
+      try {
+        this.path(path);
+      } catch (error) {
+        if (error instanceof CodeMemoryError && error.code === "PATH_OUT_OF_SCOPE") return false;
+        throw error;
+      }
+      return !excluded(resolve(this.context.canonicalRoot, path)) && included(path);
+    };
   }
   private async capture(
     db: HistoryStore,
@@ -248,6 +283,9 @@ export class HistoryService {
   }
   private gap(job: HistoryJob, error: string) {
     job.data.gapCount = Number(job.data.gapCount ?? 0) + 1;
+    // Only Git-stage gaps that a new walk could fill force a full history walk next time.
+    if (job.data.stage === "GIT" && !nonBlockingGaps.has(error))
+      job.data.blockingGapCount = Number(job.data.blockingGapCount ?? 0) + 1;
     const gaps = (job.data.gaps ?? []) as string[];
     if (gaps.length < 10 && !gaps.includes(error)) gaps.push(error);
     job.data.gaps = gaps;
@@ -257,6 +295,7 @@ export class HistoryService {
     return this.db.runExclusive(async (db, leaseSignal) => {
       signal = AbortSignal.any([leaseSignal, ...(signal ? [signal] : [])]);
       this.batchExcerptBytes = undefined;
+      const eligible = this.eligibility();
       const settings = await db.settings();
       if (!settings.documents && !settings.git && !settings.wip)
         throw new CodeMemoryError(
@@ -275,6 +314,7 @@ export class HistoryService {
         throw new CodeMemoryError("NOT_FOUND", "Collection job not found in selected project");
       if (!job) {
         const cursor = await db.cursor(worktreeId, "GIT_HISTORY");
+        const excludeGenerated = this.context.effectiveConfig.excludeGenerated;
         const skipGit =
           cursor?.head === git.head &&
           cursor?.complete === true &&
@@ -284,7 +324,9 @@ export class HistoryService {
           cursor?.complete &&
           cursor?.policyGeneration === settings.policyGeneration &&
           cursor?.shallow === git.shallow &&
-          !cursor?.gapCount
+          (cursor?.excludeGenerated ?? excludeGenerated) === excludeGenerated &&
+          // Cursors written before blockingGapCount existed fall back to every gap.
+          !(cursor?.blockingGapCount ?? cursor?.gapCount)
             ? cursor.head
             : null;
         if (typeof excludeHead === "string")
@@ -293,6 +335,19 @@ export class HistoryService {
           } catch {
             excludeHead = null;
           }
+        // The quota baseline is read once per job; batches carry the running total.
+        const excerptBytes = Number((await db.stats()).excerptBytes);
+        // Retention is maintenance: a failure here must never block collection.
+        try {
+          await db.pruneJobs(jobRetentionDays, jobPruneChunk);
+        } catch (error) {
+          log("warn", "history_job_prune_failed", {
+            code:
+              error instanceof CodeMemoryError
+                ? error.code
+                : ((error as { code?: unknown }).code ?? "INTERNAL_ERROR"),
+          });
+        }
         const value: HistoryJob = {
           id: randomUUID(),
           kind: "COLLECT",
@@ -311,6 +366,8 @@ export class HistoryService {
             skipGit,
             excludeHead,
             shallow: git.shallow,
+            excerptBytesBaseline: excerptBytes,
+            excerptBytesUsed: excerptBytes,
           },
         };
         const jobId = await db.enqueue(
@@ -336,6 +393,13 @@ export class HistoryService {
       job.state = "RUNNING";
       job.data.owner = { ...runtimeInfo(), sessionId: this.context.sessionId };
       await db.saveJob(job);
+      if (typeof job.data.excerptBytesUsed === "number")
+        this.batchExcerptBytes = job.data.excerptBytesUsed;
+      const cacheKey = [
+        job.id,
+        String(job.data.head ?? ""),
+        String(settings.policyGeneration),
+      ].join("\0");
       const started = Date.now();
       const check = () => {
         if (signal?.aborted)
@@ -344,30 +408,43 @@ export class HistoryService {
       try {
         check();
         if (job.data.stage === "DOCUMENTS") {
-          const target = Number(job.data.docOffset ?? 0);
-          let count = 0,
-            digest = "";
-          const selected: string[] = [];
-          const scan = await new RepositoryScanner().discover(this.context, async (path) => {
-            check();
-            if (!/\.md$/i.test(path)) return;
-            digest = hash(`${digest}\0${path}`);
-            if (count >= target && selected.length < p.batchSize) selected.push(path);
-            count++;
-            if (count > 100000)
-              throw new CodeMemoryError(
-                "HISTORY_DISCOVERY_LIMIT",
-                "Document enumeration exceeds 100000 paths; narrow the explicit source scope",
-              );
-          });
-          if (job.data.documentPathsHash && job.data.documentPathsHash !== digest) {
+          // A listing from another process's progress (different digest) is recomputed.
+          let listing =
+            this.documentListing?.key === cacheKey &&
+            this.documentListing.digest === job.data.documentPathsHash
+              ? this.documentListing
+              : undefined;
+          const fresh = !listing;
+          if (!listing) {
+            let digest = "";
+            const paths: string[] = [];
+            const scan = await new RepositoryScanner().discover(this.context, async (path) => {
+              check();
+              if (!/\.md$/i.test(path)) return;
+              digest = hash(`${digest}\0${path}`);
+              paths.push(path);
+              if (paths.length > 100000)
+                throw new CodeMemoryError(
+                  "HISTORY_DISCOVERY_LIMIT",
+                  "Document enumeration exceeds 100000 paths; narrow the explicit source scope",
+                );
+            });
+            listing = { key: cacheKey, paths, digest, exclusions: scan.exclusions };
+            this.documentListing = listing;
+          }
+          if (
+            fresh &&
+            job.data.documentPathsHash &&
+            job.data.documentPathsHash !== listing.digest
+          ) {
             job.data.docOffset = 0;
-            job.data.documentPathsHash = digest;
+            job.data.documentPathsHash = listing.digest;
             job.data.scan = new Date().toISOString();
             this.gap(job, "DOCUMENT_SCOPE_CHANGED");
           } else {
-            job.data.documentPathsHash = digest;
-            for (const path of selected) {
+            job.data.documentPathsHash = listing.digest;
+            const target = Number(job.data.docOffset ?? 0);
+            for (const path of listing.paths.slice(target, target + p.batchSize)) {
               check();
               try {
                 const result = await this.capture(
@@ -404,12 +481,12 @@ export class HistoryService {
                 await db.documentHead(worktreeId, path, revisionId, String(job.data.scan));
               }
               job.data.docOffset = Number(job.data.docOffset) + 1;
-              await db.saveJob(job);
             }
-            job.data.documentExclusions = scan.exclusions;
-            if (Number(job.data.docOffset) >= count) {
+            job.data.documentExclusions = listing.exclusions;
+            if (Number(job.data.docOffset) >= listing.paths.length) {
               await db.reconcileDocuments(worktreeId, String(job.data.scan));
               job.data.stage = settings.git && !job.data.skipGit ? "GIT" : "WIP";
+              this.documentListing = undefined;
             }
           }
         } else if (job.data.stage === "GIT") {
@@ -419,17 +496,26 @@ export class HistoryService {
             job.data.stage = "WIP";
           } else {
             let budget = p.batchSize;
+            const excludeHead =
+              typeof job.data.excludeHead === "string" ? job.data.excludeHead : undefined;
             while (budget > 0) {
               check();
-              const commitId = (
-                await this.git.commits(
-                  this.context.canonicalRoot,
-                  head,
-                  Number(job.data.commitOffset),
-                  1,
-                  typeof job.data.excludeHead === "string" ? job.data.excludeHead : undefined,
-                )
-              )[0];
+              // Commits are listed in pages; topo-order output is stable for a fixed HEAD.
+              const offset = Number(job.data.commitOffset);
+              const start = offset - (offset % commitPageSize);
+              if (this.commitPage?.key !== cacheKey || this.commitPage.start !== start)
+                this.commitPage = {
+                  key: cacheKey,
+                  start,
+                  ids: await this.git.commits(
+                    this.context.canonicalRoot,
+                    head,
+                    start,
+                    commitPageSize,
+                    excludeHead,
+                  ),
+                };
+              const commitId = this.commitPage.ids[offset - start];
               if (!commitId) {
                 job.data.stage = "WIP";
                 await db.cursor(worktreeId, "GIT_HISTORY", {
@@ -438,27 +524,44 @@ export class HistoryService {
                   commits: job.data.commitOffset,
                   policyGeneration: settings.policyGeneration,
                   shallow: job.data.shallow,
+                  excludeGenerated: this.context.effectiveConfig.excludeGenerated,
                   gapCount: job.data.gapCount ?? 0,
+                  blockingGapCount: job.data.blockingGapCount ?? 0,
                   gaps: job.data.gaps ?? [],
                 });
+                this.commitPage = undefined;
+                this.currentCommit = undefined;
                 break;
               }
-              const meta = await this.git.commit(this.context.canonicalRoot, commitId);
-              await db.commit({
-                id: commitId,
-                objectFormat: String(job.data.objectFormat),
-                tree: meta.tree,
-                parents: meta.parents,
-                committedAt: meta.committedAt,
-                data: { subject: meta.subject, subjectAuthority: meta.subjectAuthority },
-              });
-              const parent = meta.parents[Number(job.data.parentOffset)];
-              let changes: GitChange[];
-              try {
-                changes = await this.git.changes(this.context.canonicalRoot, commitId, parent);
-              } catch (e) {
-                this.gap(job, code(e));
-                changes = [];
+              const commitKey = `${cacheKey}\0${commitId}`;
+              let current = this.currentCommit?.key === commitKey ? this.currentCommit : undefined;
+              if (!current) {
+                const meta = await this.git.commit(this.context.canonicalRoot, commitId);
+                // A resumed commit was stored before its offsets advanced.
+                if (!Number(job.data.parentOffset) && !Number(job.data.fileOffset))
+                  await db.commit({
+                    id: commitId,
+                    objectFormat: String(job.data.objectFormat),
+                    tree: meta.tree,
+                    parents: meta.parents,
+                    committedAt: meta.committedAt,
+                    data: { subject: meta.subject, subjectAuthority: meta.subjectAuthority },
+                  });
+                current = { key: commitKey, meta, changes: new Map() };
+                this.currentCommit = current;
+              }
+              const meta = current.meta;
+              const parentOffset = Number(job.data.parentOffset);
+              const parent = meta.parents[parentOffset];
+              let changes = current.changes.get(parentOffset);
+              if (!changes) {
+                try {
+                  changes = await this.git.changes(this.context.canonicalRoot, commitId, parent);
+                } catch (e) {
+                  this.gap(job, code(e));
+                  changes = [];
+                }
+                current.changes.set(parentOffset, changes);
               }
               while (Number(job.data.fileOffset) < changes.length && budget > 0) {
                 check();
@@ -472,7 +575,7 @@ export class HistoryService {
                   change.oldPath ?? "",
                   change.newPath ?? "",
                 );
-                if (this.eligible(path) && (!change.oldPath || this.eligible(change.oldPath))) {
+                if (eligible(path) && (!change.oldPath || eligible(change.oldPath))) {
                   const data: HistoryData = {
                     kind: "OBSERVATION",
                     rationale: "UNKNOWN",
@@ -560,7 +663,6 @@ export class HistoryService {
                 } else job.data.excludedChanges = Number(job.data.excludedChanges ?? 0) + 1;
                 job.data.fileOffset = Number(job.data.fileOffset) + 1;
                 budget--;
-                await db.saveJob(job);
               }
               if (Number(job.data.fileOffset) >= changes.length) {
                 job.data.fileOffset = 0;
@@ -570,22 +672,26 @@ export class HistoryService {
                   job.data.commitOffset = Number(job.data.commitOffset) + 1;
                 }
                 budget--;
-                await db.saveJob(job);
               }
             }
           }
         } else if (job.data.stage === "WIP") {
-          if (settings.wip) await this.captureWip(db, settings, job, p.batchSize, check);
+          if (settings.wip)
+            await this.captureWip(db, settings, job, p.batchSize, check, eligible, cacheKey);
           else job.data.stage = "COMPLETE";
         }
         job.state = job.data.stage === "COMPLETE" ? "SUCCEEDED" : "QUEUED";
         job.data.elapsedMs = Number(job.data.elapsedMs ?? 0) + Date.now() - started;
         job.data.lastBatchMs = Date.now() - started;
         job.data.rssBytes = process.memoryUsage().rss;
+        if (this.batchExcerptBytes !== undefined)
+          job.data.excerptBytesUsed = this.batchExcerptBytes;
         await db.saveJob(job);
       } catch (e) {
         job.state = signal?.aborted ? "QUEUED" : "FAILED";
         job.data.error = code(e);
+        if (this.batchExcerptBytes !== undefined)
+          job.data.excerptBytesUsed = this.batchExcerptBytes;
         await db.saveJob(job);
         if (!signal?.aborted) throw e;
       }
@@ -598,6 +704,8 @@ export class HistoryService {
     job: HistoryJob,
     batchSize: number,
     check: () => void,
+    eligible: (path: string) => boolean,
+    cacheKey: string,
   ) {
     const root = this.context.canonicalRoot;
     const current = await this.git.inspect(root);
@@ -631,29 +739,38 @@ export class HistoryService {
           }),
       );
     const staged = parse(index);
-    const head = current.head
-      ? parse(await this.git.tree(root, current.head))
-      : new Map<string, string[]>();
-    // Discovery and object maps are bounded by the Git adapter output cap. No worktree Git diff/filter execution.
-    const files = new Set<string>();
-    await new RepositoryScanner().discover(this.context, async (path) => {
-      files.add(path);
-    });
-    const paths = [...new Set([...files, ...staged.keys(), ...head.keys()])].sort();
-    const pathsHash = hash(JSON.stringify(paths));
-    if (job.data.wipPathsHash && job.data.wipPathsHash !== pathsHash) {
-      this.gap(job, "WIP_SCOPE_CHANGED");
-      job.data.stage = "COMPLETE";
-      return;
+    // The unchanged index hash keeps staged paths stable, so the path snapshot is reused per job.
+    let snapshot =
+      this.wipSnapshot?.key === cacheKey && this.wipSnapshot.pathsHash === job.data.wipPathsHash
+        ? this.wipSnapshot
+        : undefined;
+    if (!snapshot) {
+      const head = current.head
+        ? parse(await this.git.tree(root, current.head))
+        : new Map<string, string[]>();
+      // Discovery and object maps are bounded by the Git adapter output cap. No worktree Git diff/filter execution.
+      const files = new Set<string>();
+      await new RepositoryScanner().discover(this.context, async (path) => {
+        files.add(path);
+      });
+      const paths = [...new Set([...files, ...staged.keys(), ...head.keys()])].sort();
+      snapshot = { key: cacheKey, paths, files, head, pathsHash: hash(JSON.stringify(paths)) };
+      if (job.data.wipPathsHash && job.data.wipPathsHash !== snapshot.pathsHash) {
+        this.gap(job, "WIP_SCOPE_CHANGED");
+        job.data.stage = "COMPLETE";
+        return;
+      }
+      this.wipSnapshot = snapshot;
     }
-    job.data.wipPathsHash = pathsHash;
+    const { paths, files, head } = snapshot;
+    job.data.wipPathsHash = snapshot.pathsHash;
     let offset = Number(job.data.wipOffset ?? 0),
       processed = 0;
     while (offset < paths.length && processed < batchSize) {
       check();
       const path = paths[offset++];
       if (!path) continue;
-      if (!this.eligible(path)) continue;
+      if (!eligible(path)) continue;
       const stage = staged.get(path),
         base = head.get(path);
       // ls-files: mode object stage; ls-tree: mode type object.
@@ -701,11 +818,27 @@ export class HistoryService {
         if (stageObject !== headObject) await write("STAGED", stageBytes, stageObject, headObject);
         if (files.has(path)) {
           const bytes = await readSource(this.context, path, settings.maxFileBytes);
-          const objectHash = createHash(current.objectFormat ?? "sha1")
-            .update(`blob ${bytes.length}\0`)
-            .update(bytes)
-            .digest("hex");
-          if (!stageObject || stageObject !== objectHash)
+          const blobId = (value: Buffer) =>
+            createHash(current.objectFormat ?? "sha1")
+              .update(`blob ${value.length}\0`)
+              .update(value)
+              .digest("hex");
+          let modified = !stageObject || stageObject !== blobId(bytes);
+          if (stageObject && modified) {
+            // Index blobs are stored after clean conversion. core.autocrlf is unreadable because
+            // the adapter disables system/global config, so a CRLF-only difference counts as clean.
+            const normalized = Buffer.from(
+              bytes.toString("latin1").replace(/\r\n/g, "\n"),
+              "latin1",
+            );
+            if (normalized.length !== bytes.length && blobId(normalized) === stageObject)
+              modified = false;
+            else if (await this.filtered(root, path, stageObject)) {
+              this.gap(job, "UNSUPPORTED_SOURCE");
+              modified = false;
+            }
+          }
+          if (modified)
             await write(stageObject ? "UNSTAGED" : "UNTRACKED", bytes, undefined, stageObject);
         } else if (stageObject) await write("UNSTAGED", undefined, undefined, stageObject);
       } catch (e) {
@@ -714,7 +847,6 @@ export class HistoryService {
       }
       processed++;
       job.data.wipOffset = offset;
-      await db.saveJob(job);
     }
     job.data.wipOffset = offset;
     if (offset >= paths.length) {
@@ -733,12 +865,30 @@ export class HistoryService {
         gapCount: job.data.gapCount ?? 0,
       });
       job.data.stage = "COMPLETE";
+      this.wipSnapshot = undefined;
     }
   }
-  private async applicability(rows: HistoryData[]) {
+  /** Worktree bytes of filtered, ident or re-encoded paths and LFS pointers cannot be compared with index blob IDs. */
+  private async filtered(root: string, path: string, object: string) {
+    const attributes = await this.git.attributes(root, path, [
+      "filter",
+      "ident",
+      "working-tree-encoding",
+    ]);
+    if ([...attributes.values()].some((v) => v !== "unspecified" && v !== "unset")) return true;
+    const pointer = await this.git.blob(root, object, 1024).catch(() => undefined);
+    return !!pointer?.toString("latin1").startsWith("version https://git-lfs");
+  }
+  private async queryContext(): Promise<QueryContext> {
     const current = await this.git.inspect(this.context.canonicalRoot);
-    const hashes = new Map<string, Promise<string>>();
-    const ancestry = new Map<string, Promise<boolean | null>>();
+    return {
+      current: { head: current.head, branch: current.branch },
+      hashes: new Map(),
+      ancestry: new Map(),
+    };
+  }
+  private async applicability(rows: HistoryData[], shared?: QueryContext) {
+    const { current, hashes, ancestry } = shared ?? (await this.queryContext());
     const results = [];
     for (const row of rows) {
       const path = String(row.new_path ?? row.old_path ?? row.path ?? "");
@@ -785,11 +935,14 @@ export class HistoryService {
     return { results, currentHead: current.head, currentBranch: current.branch };
   }
   async search(input: unknown): Promise<HistoryData> {
+    return this.query(input);
+  }
+  private async query(input: unknown, shared?: QueryContext): Promise<HistoryData> {
     const p = historyReadSchemas.search_history.parse(input);
     this.path(p.path);
     const page = await this.db.list(p.kind, p.query, p.path, p.limit, p.offset, p.revisionId);
     const current = ["changes", "documents", "intent", "wip"].includes(p.kind)
-      ? await this.applicability(page.results)
+      ? await this.applicability(page.results, shared)
       : {};
     return {
       ...page,
@@ -871,22 +1024,30 @@ export class HistoryService {
     const p = historyReadSchemas.engineering_context.parse(input);
     const results = [];
     const sectionLimit = Math.min(p.limit, 3);
+    // One HEAD lookup and shared source/ancestry checks serve every section of this request.
+    const shared = await this.queryContext();
     for (const path of p.paths.length ? p.paths : [""]) {
       this.path(path);
-      const changes = await this.search({
-        kind: "changes",
-        query: path ? "" : p.task,
-        path,
-        limit: sectionLimit,
-        offset: p.offset,
-      });
-      const documents = await this.search({
-        kind: "intent",
-        query: path ? "" : p.task,
-        path,
-        limit: sectionLimit,
-        offset: p.offset,
-      });
+      const changes = await this.query(
+        {
+          kind: "changes",
+          query: path ? "" : p.task,
+          path,
+          limit: sectionLimit,
+          offset: p.offset,
+        },
+        shared,
+      );
+      const documents = await this.query(
+        {
+          kind: "intent",
+          query: path ? "" : p.task,
+          path,
+          limit: sectionLimit,
+          offset: p.offset,
+        },
+        shared,
+      );
       results.push({ path, relevantChanges: changes, documentedIntent: documents });
     }
     return {
@@ -898,7 +1059,7 @@ export class HistoryService {
         "Use recall_context for approved applicable rules",
         "Change locators are syntactic; resolve callers and Prisma uses in the current code graph",
       ],
-      currentHead: (await this.git.inspect(this.context.canonicalRoot)).head,
+      currentHead: shared.current.head,
     };
   }
   async submit(input: unknown): Promise<HistoryData> {
@@ -1039,6 +1200,13 @@ export class HistoryService {
             job.state = "READY";
             await db.saveJob(job);
           } catch (e) {
+            // Shutdown or a lost provider lease is not a provider attempt; requeue for the next worker.
+            if (modelSignal.aborted || signal?.aborted) {
+              delete job.data.owner;
+              job.data.interruption = code(e);
+              await db.requeueCancelled(job);
+              return;
+            }
             job.state = "FAILED";
             job.data.error = code(e);
             await db.saveJob(job);
@@ -1053,6 +1221,15 @@ export class HistoryService {
       (settings.documents || settings.git || settings.wip)
     ) {
       this.nextAutomaticAt = Date.now() + 30000;
+      const { worktreeId } = await this.identity();
+      const last = await this.db.latestJob("COLLECT", worktreeId);
+      // A quota failure repeats until configure or a purge changes the state; do not add a job per tick.
+      if (
+        last?.state === "FAILED" &&
+        last.data.error === "HISTORY_QUOTA" &&
+        last.data.policyGeneration === settings.policyGeneration
+      )
+        return false;
       await this.collect({}, signal);
       return true;
     }

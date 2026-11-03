@@ -215,7 +215,7 @@ ON CONFLICT(repository_id,worktree_id,path,layer) DO UPDATE SET revision_id=$5,s
   }
   async reconcileWip(w: string, scan: string) {
     await this.q(
-      "UPDATE history_wip_entries SET state='RESOLVED_RECHECK_HISTORY' WHERE repository_id=$1 AND worktree_id=$2 AND observed_at < $3::timestamptz",
+      "UPDATE history_wip_entries SET state='RESOLVED_RECHECK_HISTORY' WHERE repository_id=$1 AND worktree_id=$2 AND observed_at < $3::timestamptz AND state<>'RESOLVED_RECHECK_HISTORY'",
       [w, scan],
     );
   }
@@ -228,7 +228,7 @@ ON CONFLICT(repository_id,worktree_id,path) DO UPDATE SET previous_revision_id=C
   }
   async reconcileDocuments(w: string, scan: string) {
     await this.q(
-      "UPDATE history_document_heads SET state='MISSING_OR_EXCLUDED' WHERE repository_id=$1 AND worktree_id=$2 AND observed_at < $3::timestamptz",
+      "UPDATE history_document_heads SET state='MISSING_OR_EXCLUDED' WHERE repository_id=$1 AND worktree_id=$2 AND observed_at < $3::timestamptz AND state<>'MISSING_OR_EXCLUDED'",
       [w, scan],
     );
   }
@@ -289,6 +289,42 @@ updated_at=now(),attempts=attempts+CASE WHEN $3='RUNNING' AND state<>'RUNNING' T
     );
     if (result.rows[0]) job.data = result.rows[0].data;
   }
+  /** Returns an interrupted job to the queue without consuming a provider attempt. */
+  async requeueCancelled(job: HistoryJob) {
+    const result = await this.q(
+      "UPDATE history_jobs SET state='QUEUED',data=$3,updated_at=now(),attempts=greatest(attempts-1,0) WHERE repository_id=$1 AND id=$2 AND state='RUNNING' RETURNING data,attempts",
+      [job.id, job.data],
+    );
+    const row = result.rows[0];
+    if (row) {
+      job.state = "QUEUED";
+      job.data = row.data;
+      job.attempts = row.attempts;
+    }
+  }
+  async latestJob(kind: string, worktreeId: string) {
+    return (
+      await this.q(
+        "SELECT id,kind,state,data,created_at,attempts FROM history_jobs WHERE repository_id=$1 AND kind=$2 AND data->>'worktreeId'=$3 ORDER BY created_at DESC,id DESC LIMIT 1",
+        [kind, worktreeId],
+      )
+    ).rows[0] as HistoryJob | undefined;
+  }
+  /**
+   * Deletes up to `limit` old terminal collection jobs, keeping the latest per worktree.
+   * Interpretation jobs are audit records. The kept set is computed once per statement
+   * (not per candidate row) and each call is bounded, so a large backlog drains over calls.
+   */
+  async pruneJobs(days: number, limit = 1000) {
+    const result = await this.q(
+      `DELETE FROM history_jobs d WHERE d.repository_id=$1 AND d.id IN (
+SELECT j.id FROM history_jobs j WHERE j.repository_id=$1 AND j.kind='COLLECT' AND j.state IN ('SUCCEEDED','FAILED','CANCELLED') AND j.updated_at < now()-($2::int * interval '1 day')
+AND j.id NOT IN (SELECT DISTINCT ON (l.data->>'worktreeId') l.id FROM history_jobs l WHERE l.repository_id=$1 AND l.kind='COLLECT' ORDER BY l.data->>'worktreeId',l.created_at DESC,l.id DESC)
+LIMIT $3)`,
+      [days, limit],
+    );
+    return result.rowCount ?? 0;
+  }
   async runExclusive<T>(
     action: (store: HistoryStore, leaseSignal: AbortSignal) => Promise<T>,
   ): Promise<T> {
@@ -306,7 +342,8 @@ updated_at=now(),attempts=attempts+CASE WHEN $3='RUNNING' AND state<>'RUNNING' T
       acquired =
         (
           await c.query(
-            "SELECT pg_try_advisory_lock(hashtextextended('codememory:history-worker',0)) AS ok",
+            "SELECT pg_try_advisory_lock(hashtextextended('codememory:history-worker:'||$1,0)) AS ok",
+            [this.scope],
           )
         ).rows[0]?.ok === true;
       if (!acquired)
@@ -322,7 +359,8 @@ updated_at=now(),attempts=attempts+CASE WHEN $3='RUNNING' AND state<>'RUNNING' T
       try {
         if (acquired && !failed)
           await c.query(
-            "SELECT pg_advisory_unlock(hashtextextended('codememory:history-worker',0))",
+            "SELECT pg_advisory_unlock(hashtextextended('codememory:history-worker:'||$1,0))",
+            [this.scope],
           );
       } finally {
         c.removeListener("error", onError);

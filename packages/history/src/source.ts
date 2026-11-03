@@ -9,7 +9,13 @@ import ts from "typescript";
 export async function readSource(context: ProjectContext, path: string, maxBytes: number) {
   let lexical = resolve(context.canonicalRoot, path);
   while (contains(context.canonicalRoot, lexical) && lexical !== context.canonicalRoot) {
-    if ((await lstat(lexical)).isSymbolicLink())
+    const stat = await lstat(lexical).catch((e: { code?: string }) => {
+      // Deleted or renamed sources are missing, not read failures.
+      if (e.code === "ENOENT" || e.code === "ENOTDIR")
+        throw new CodeMemoryError("NOT_FOUND", "Source path not found");
+      throw e;
+    });
+    if (stat.isSymbolicLink())
       throw new CodeMemoryError("SYMLINK", "Source links are not followed");
     lexical = dirname(lexical);
   }

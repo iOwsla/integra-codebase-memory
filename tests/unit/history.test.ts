@@ -1,6 +1,11 @@
-import { expect, it } from "vitest";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { createProjectContext, GitCli } from "@codememory/shared";
+import { fixture } from "@codememory/test-utils";
+import { expect, it, vi } from "vitest";
 import { diffLines } from "../../packages/history/src/diff";
 import { segmentMarkdown } from "../../packages/history/src/markdown";
+import { readSource } from "../../packages/history/src/source";
 
 it("preserves exact Unicode, CRLF and duplicate-heading ranges and excludes both generated instruction blocks", () => {
   const source =
@@ -24,4 +29,31 @@ it("keeps fenced headings as code and computes separated changes including final
   expect(result.coarse).toBe(false);
   expect(diffLines("a", "a\n").hunks).toHaveLength(1);
   expect(diffLines("a\nb", "c\nd", { maxEditDistance: 0 }).coarse).toBe(true);
+});
+it("reads a Git blob with one process, maps oversized output and parses attributes", async () => {
+  const f = await fixture({
+    "a.ts": "export const a = 1;\n",
+    ".gitattributes": "*.bin filter=lfs\n",
+  });
+  try {
+    const run = promisify(execFile);
+    await run("git", ["-C", f.root, "init", "-q"]);
+    await run("git", ["-C", f.root, "add", "a.ts"]);
+    const git = new GitCli();
+    const object = (await git.command(f.root, ["rev-parse", ":a.ts"])).toString().trim();
+    const command = vi.spyOn(git, "command");
+    expect((await git.blob(f.root, object, 20)).toString()).toBe("export const a = 1;\n");
+    expect(command).toHaveBeenCalledTimes(1);
+    await expect(git.blob(f.root, object, 19)).rejects.toMatchObject({
+      code: "SKIPPED_TOO_LARGE",
+    });
+    const attributes = await git.attributes(f.root, "x.bin", ["filter", "ident"]);
+    expect(Object.fromEntries(attributes)).toEqual({ filter: "lfs", ident: "unspecified" });
+    const context = await createProjectContext(f.root);
+    await expect(readSource(context, "gone/missing.ts", 1024)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  } finally {
+    await f.dispose();
+  }
 });
