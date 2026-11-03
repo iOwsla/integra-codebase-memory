@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- History workers also hold the alpha.34 global history-worker lock in shared mode, so a not-yet-restarted alpha.34 history process and a new worker can no longer process the same job at once. Workers for different projects still run concurrently.
+- WIP capture writes an UNSTAGED deletion for a tracked file deleted mid-sweep instead of a NOT_FOUND gap, and re-checks the worktree path set once at the end of the sweep; a changed set records `WIP_SCOPE_CHANGED` and an INCONSISTENT cursor.
+- The history excerpt quota re-reads the stored total before failing with HISTORY_QUOTA, and `history cleanup --apply` resets the cached total of in-flight collections. Automatic collection paused by HISTORY_QUOTA resumes once space has been freed.
+- Turning `excludeGenerated` off with an unchanged HEAD now re-walks Git history, so generated sources that are now allowed are collected.
 - Migration 11 drops the foreign keys and primary key of `symbol_edges`. Publication now deletes edges of removed symbols itself, matching the former cascade. On 300k real edges this raised edge insert throughput 2.3-2.5x and halved WAL volume.
 - Record the receiver's static class/interface on call edges (`receiverType`) and keep a `find_callers` dispatch row only when that type is an ancestor of the queried member. Calls on a sibling subclass that inherits the base member are no longer reported as possible callers of an override. The analyzer version changes, so existing indexes re-analyze once.
 - evaluate-project: exclude `this` keyword matches and inherited-member calls on sibling receivers from the language-service oracle.

@@ -101,8 +101,8 @@ it("lists, diffs, reads and discovers once per job instead of once per batch", a
     expect(count("cat-file")).toBe(203);
     expect(count("cat-file", "-s")).toBe(0);
     expect(count("ls-tree")).toBe(1);
-    // DOCUMENTS and WIP each enumerate the worktree once.
-    expect(discover).toHaveBeenCalledTimes(2);
+    // DOCUMENTS and WIP each enumerate the worktree once; WIP re-validates its scope once at the end.
+    expect(discover).toHaveBeenCalledTimes(3);
     // The quota baseline is read when the job is created, not per batch.
     expect(stats).toHaveBeenCalledTimes(1);
     const changes = await history.search({ kind: "changes", limit: 1 });
