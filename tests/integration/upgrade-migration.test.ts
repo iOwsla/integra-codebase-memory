@@ -65,7 +65,7 @@ it("activation migrates an alpha.34 managed database before the new runtime inde
 
     await migrateRuntimeDatabases([registration(f.root, true)], { managedUrl: async () => db.url });
     expect(await schemaVersion(db)).toBe(requiredSchemaVersion);
-    expect(requiredSchemaVersion).toBe(14);
+    expect(requiredSchemaVersion).toBe(15);
     expect(
       (
         await db.store.pool.query(

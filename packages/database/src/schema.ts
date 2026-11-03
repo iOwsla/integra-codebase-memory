@@ -186,4 +186,12 @@ BEGIN
   RETURN NEW;
 END $$;
 DROP INDEX IF EXISTS files_incomplete;`,
+  // search_code reads trigram candidates of one project in path order (see the reader). The
+  // former index was partial on data->>'status', which files_path_c shares; for a query the
+  // planner then often preferred a full walk of files_path_c over the trigram index. Leading
+  // with repository_id also stops other projects' files from being decompressed for recheck.
+  // btree_gin is a trusted contrib extension, like pg_trgm.
+  `CREATE EXTENSION IF NOT EXISTS btree_gin;
+CREATE INDEX files_content_repo ON files USING gin(repository_id, lower(data->>'content') gin_trgm_ops);
+DROP INDEX IF EXISTS files_content_lower;`,
 ];
