@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import type {
   Analysis,
@@ -38,8 +39,28 @@ const defaults: ts.CompilerOptions = {
   jsx: ts.JsxEmit.Preserve,
   skipLibCheck: true,
   types: [],
-  noLib: true,
 };
+
+// Standard library declarations come from CodeMemory's own TypeScript package,
+// never from the selected project. Without them Record, Promise and other
+// built-in generics collapse to `any` and member calls through them stay unresolved.
+const libDirectory = dirname(ts.getDefaultLibFilePath({}));
+const libFiles = new Map<string, ts.SourceFile | null>();
+const isLibFile = (path: string) =>
+  dirname(path) === libDirectory && /^lib\.[\w.]+\.d\.ts$/.test(basename(path));
+function libSourceFile(path: string, target: ts.ScriptTarget) {
+  const key = `${target}:${path}`;
+  let file = libFiles.get(key);
+  if (file === undefined) {
+    try {
+      file = ts.createSourceFile(path, readFileSync(path, "utf8"), target, true);
+    } catch {
+      file = null;
+    }
+    libFiles.set(key, file);
+  }
+  return file ?? undefined;
+}
 
 /** Virtual workspace mounts expose already-scanned packages to the TS resolver.
  * No method delegates a filesystem lookup to ts.sys or follows a real symlink. */
@@ -304,7 +325,8 @@ export class CompilerWorkspace {
       allowJs: true,
       noEmit: true,
       types: [],
-      noLib: true,
+      noLib: false,
+      libReplacement: false,
     };
   }
   *sources() {
@@ -335,17 +357,26 @@ export class CompilerWorkspace {
       const options = this.options(config);
       const host: ts.CompilerHost = {
         getSourceFile: (path, version) => {
+          if (isLibFile(resolve(path)))
+            return libSourceFile(
+              resolve(path),
+              typeof version === "object" ? version.languageVersion : version,
+            );
           const actual = this.sourcePath(path),
             content = this.texts.get(actual);
           return content === undefined
             ? undefined
             : ts.createSourceFile(actual, content, version, true);
         },
-        getDefaultLibFileName: () => "",
+        getDefaultLibFileName: (o) => resolve(libDirectory, ts.getDefaultLibFileName(o)),
+        getDefaultLibLocation: () => libDirectory,
         writeFile: () => {},
         getCurrentDirectory: () => this.context.canonicalRoot,
         getDirectories: (p) => [...this.directories].filter((d) => dirname(d) === resolve(p)),
-        fileExists: (p) => this.read(p) !== undefined,
+        fileExists: (p) =>
+          isLibFile(resolve(p))
+            ? !!libSourceFile(resolve(p), options.target ?? ts.ScriptTarget.ESNext)
+            : this.read(p) !== undefined,
         readFile: this.read,
         directoryExists: this.directoryExists,
         getCanonicalFileName: (p) => this.sourcePath(p),

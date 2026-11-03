@@ -310,3 +310,38 @@ it("times out blocked reads with a domain error and releases the transaction", a
     await t.dispose();
   }
 });
+
+it("lists interface and base-class dispatch callers with their supertype member", async () => {
+  const db = await testDatabase(),
+    c = await createProjectContext(resolve("tests/fixtures/typescript/dispatch"));
+  try {
+    await db.store.register(c);
+    await new IndexService(c, db.store, new RepositoryScanner(), new TypeScriptPlugin()).index();
+    const service = new CodebaseService(c, db.store);
+    const callers = async (name: string) =>
+      (
+        (await service.execute("find_callers", { name, limit: 100 })).results as {
+          line: number;
+          symbol: CodeSymbol;
+          dispatch?: { via: { qualifiedName: string } };
+        }[]
+      ).map((r) => [r.symbol.qualifiedName, r.line, r.dispatch?.via.qualifiedName ?? null]);
+    expect(await callers("StripeHandler.verify")).toEqual([
+      ["Service.direct", 6, "Handler.verify"],
+      ["Service.viaUnion", 7, "Handler.verify"],
+      ["Service.concrete", 8, null],
+      ["Service.viaPromise", 9, "Handler.verify"],
+    ]);
+    // Supertype members only report their own callers; static members never match instance ones.
+    expect(await callers("Handler.verify")).toEqual([
+      ["Service.direct", 6, null],
+      ["Service.viaUnion", 7, null],
+      ["Service.viaPromise", 9, null],
+    ]);
+    expect(await callers("Sub.run")).toEqual([["Service.base", 11, "Base.run"]]);
+    expect(await callers("Static.run")).toEqual([["Service.staticCall", 10, null]]);
+    expect(await callers("CustomHandler.verify")).toHaveLength(3);
+  } finally {
+    await db.dispose();
+  }
+});
