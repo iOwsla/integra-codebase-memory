@@ -1,9 +1,36 @@
 <!-- integra-code-memory:start -->
 # Integra CodeMemory
 
-This project uses the `integra_code_memory` MCP server for project-scoped code
-intelligence. Prefer its tools for structural code discovery when available.
-Use only tools actually exposed in the current session; client prefixes may vary.
+This project has a code graph and source index served by the `integra_code_memory`
+MCP server. Use it before shell searches for code questions.
+
+## First steps in every task
+
+1. If its tools are listed as deferred, load them all with one ToolSearch call
+   (query `+integra_code_memory`, max_results 30) before anything else.
+2. Call `codebase_status`, then `recall_context` with a short English task and
+   the relative paths you expect to touch.
+3. Then work with the tools below. Prefixes such as `mcp__integra_code_memory__`
+   vary by client; use only tools that are actually exposed.
+
+## Use these instead of grep, cat and find
+
+| You want to | Use | Not |
+| --- | --- | --- |
+| Find where a function, class or type is declared | `search_symbols` | `grep -rn "function X"` |
+| Find text, literals or an existing implementation in source | `search_code` | `grep -r`, `rg` |
+| Read a declaration or the code around a line | `get_symbol`, `get_file_context` | `cat`, `sed -n` |
+| See a file's structure | `get_file_outline` | reading the whole file |
+| Know who calls something or what it calls | `find_callers`, `find_callees` | grepping the name |
+| Know what a change affects | `find_references`, `trace_dependencies` | guessing from names |
+| Recall earlier decisions for this area | `recall_context`, `search_memory` | rereading chat history |
+
+Use native tools for file names and globs (`git ls-files`, `find`), for
+configuration and non-indexed files, for files you are editing, and when
+`codebase_status` reports pending changes or incomplete coverage for the paths
+you need. Say when you fell back to source.
+
+The rest of this block is the detailed protocol.
 
 ## Start and freshness
 
@@ -33,18 +60,6 @@ and report `limitReduced`; older servers reject values above 20, so retry with 2
 errors. `READY` is compatible with incomplete coverage. Check `runtime.version`
 after upgrades; an old client process needs reconnecting. `lastIndexJob.owner`
 identifies an index writer, not permission to terminate a process.
-
-## Tool priority
-
-1. `codebase_status` — scope, readiness and recorded index problems.
-2. `search_symbols` — locate declarations; use returned IDs to disambiguate names.
-3. `get_symbol` — inspect an indexed declaration preview and its location.
-4. `find_callers`, `find_callees`, `find_references` — incoming calls, outgoing calls
-   and other static uses. Check both directions when assessing a change.
-5. `trace_dependencies` — indirect impact; select direction and edge types.
-6. `get_file_outline`, `get_file_context` — surrounding structure and source.
-7. `search_code` — indexed text, literals and existing implementation candidates.
-8. `search_memory` — prior project decisions; verify against current code.
 
 This server has no `search_graph`, `trace_path`, `get_code_snippet`,
 `check_index_coverage`, `query_graph`, `get_architecture` or

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-alpha.37 — 2026-11-03
+
+- The installed agent instructions start with a short "first steps" section: load deferred CodeMemory tools with one tool search, call `codebase_status` and `recall_context`, and a table of which tool replaces `grep`, `cat` or `find` for each kind of code question, with the cases where native tools remain right. The detailed protocol follows unchanged. The MCP server instructions carry the same preference. In a real session on a 5,660-file project an agent never loaded the listed tools and used 13 shell commands instead. In four headless test sessions on that project (a lookup question, old and new guidance, deferred and preloaded tools) the agents still answered with Grep and Read only, so treat this as clearer guidance, not a measured change in tool choice.
+- `install-project --write` and upgrades put the managed block at the top of `CLAUDE.md` and `AGENTS.md`, moving an existing block there; project lines keep their order below it. A block that is already first is left unchanged. Previously a new block was appended after the project's own rules; in that project it sat at line 155 of 408.
+
 ## 0.1.0-alpha.36 — 2026-11-03
 
 - `search_code` chooses its own file access order instead of relying on the planner, which cannot estimate how often a substring occurs in file content and alternately walked every file for a rare term or decompressed every trigram candidate for a common one. It walks growing path windows while matches are dense and switches to the project's trigram candidates once rechecking them looks cheaper; pages are unchanged. On kiosk-software-last a first page for a common word fell from about 1.2 s to 2–8 ms and for a rare or absent term from about 0.4 s to 14–22 ms; the slowest of 45 measured pages fell from 1.27 s to 0.34 s. On modpos-integra-erp rare terms fell from about 125 ms to 6–16 ms; `prisma.`, absent from the first 520 files in path order, rose from 16 ms to 62 ms. The alpha.35 notes overstated `search_code` (2–15 ms for a common word): that held only when the planner happened to choose the path order.

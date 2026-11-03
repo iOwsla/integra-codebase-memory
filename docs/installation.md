@@ -234,8 +234,10 @@ For `--client both`, the installer writes the full current instructions into
 both AGENTS.md and CLAUDE.md, using each file's matching release template.
 It replaces only the content between
 `<!-- integra-code-memory:start -->` and
-`<!-- integra-code-memory:end -->`. Content outside the block is preserved.
-If no block exists, one is appended. Ambiguous or malformed markers fail without
+`<!-- integra-code-memory:end -->`, and keeps that block at the top of the file
+so agents read it first. A block found further down is moved to the top; content
+outside the block is preserved in its original order below it. If no block
+exists, one is added at the top. Ambiguous or malformed markers fail without
 overwriting the file.
 
 A successful shared CLI update refreshes these blocks in registered, enabled

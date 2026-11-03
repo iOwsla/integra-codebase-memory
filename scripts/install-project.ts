@@ -41,16 +41,27 @@ async function readTarget(root: string, relative: string) {
   if (info.size > 1024 * 1024) throw new Error(`Configuration exceeds 1 MiB: ${relative}`);
   return { text: await readFile(path, "utf8"), mode: info.mode & 0o777 };
 }
-function marked(existing: string | null, body: string, first = start, last = end) {
+/**
+ * Insert or replace the managed block. `leading` keeps it at the top of the file, moving an
+ * existing block there: agents read long rule files from the start and skipped a block
+ * appended after hundreds of project lines. A block already at the top stays byte-identical.
+ */
+function marked(existing: string | null, body: string, first = start, last = end, leading = false) {
   const text = existing ?? "";
   const begins = text.split(first).length - 1,
     ends = text.split(last).length - 1;
   const block = `${first}\n${body.trim()}\n${last}`;
-  if (!begins && !ends)
+  if (!begins && !ends) {
+    if (leading) return text ? `${block}\n\n${text}` : `${block}\n`;
     return `${text}${text && !text.endsWith("\n") ? "\n" : ""}${text ? "\n" : ""}${block}\n`;
+  }
   if (begins !== 1 || ends !== 1 || text.indexOf(last) < text.indexOf(first))
     throw new Error("Ambiguous installer markers; repair them before installation");
-  return text.slice(0, text.indexOf(first)) + block + text.slice(text.indexOf(last) + last.length);
+  const before = text.slice(0, text.indexOf(first)),
+    after = text.slice(text.indexOf(last) + last.length);
+  if (!leading || !before.trim()) return before + block + after;
+  const rest = before.replace(/\n+$/, "\n") + after.replace(/^\n+/, "");
+  return `${block}\n\n${rest}`;
 }
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -261,7 +272,7 @@ export async function installProject(
     const body = template
       .slice(template.indexOf(start) + start.length, template.indexOf(end))
       .trim();
-    await plan(file, (before) => marked(before, body));
+    await plan(file, (before) => marked(before, body, start, end, true));
   }
   await plan(".gitignore", (before) =>
     marked(
