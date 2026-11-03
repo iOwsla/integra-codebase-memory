@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Fix `codememory update` and `bootstrap --upgrade` never stopping running MCP servers: process discovery now accepts the installer's `--session-projects` flag in any order. An MCP process for a registered project that runs from an unverified checkout now blocks the update until its client is closed.
+- Roll back activation on SIGINT, SIGTERM or SIGHUP and release `update.lock`; retire older release entries only after the active pointer is published, and treat an empty lock older than 10 seconds as stale instead of failing with a parse error.
+- Let the shared launcher start when `update.lock` is stale (dead owner or an old empty file), report which live update blocks it, and refuse an active entry that forwards back to the launcher instead of spawning itself without end.
+- Fix `projects remove` for paths reached through symlinks; a registration whose directory was deleted can still be disabled by its path.
+- Run managed PostgreSQL with `max_wal_size=4GB`, `checkpoint_timeout=15min` and `wal_compression=lz4`; setup recreates the container and keeps the data volume.
+
 ## 0.1.0-alpha.34 — 2026-11-03
 
 - Load TypeScript standard-library declarations (`lib.d.ts` and `lib.*.d.ts`) from CodeMemory's own TypeScript package during analysis. Member calls through `Record`, `Promise` and other built-in generics now resolve instead of being recorded as unresolved; library declarations are never indexed. The analyzer version changes, so existing indexes re-analyze once.

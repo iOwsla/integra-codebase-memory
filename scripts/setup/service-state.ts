@@ -108,6 +108,16 @@ export function composeDefinition(state: ServiceState) {
         restart: "unless-stopped",
         mem_limit: "1g",
         cpus: 1,
+        // Full publishes rewrite millions of index rows; avoid forced mid-publish checkpoints.
+        command: [
+          "postgres",
+          "-c",
+          "max_wal_size=4GB",
+          "-c",
+          "checkpoint_timeout=15min",
+          "-c",
+          "wal_compression=lz4",
+        ],
         environment: {
           POSTGRES_USER: "codememory",
           POSTGRES_PASSWORD: state.password,
