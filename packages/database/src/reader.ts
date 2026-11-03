@@ -8,6 +8,19 @@ import {
 import type pg from "pg";
 
 const literalPattern = (text: string) => text.replace(/[\\%_]/g, "\\$&");
+type SearchCodeRow = {
+  file: string;
+  line: number;
+  snippet: string;
+  score: number;
+  reason: string;
+};
+type SearchCodeBatch = {
+  files: number;
+  last: string | null;
+  hits: number;
+  pageRows: SearchCodeRow[];
+};
 const pageResult = <T>(rows: T[], page: PageRequest) => ({
   results: rows.slice(0, page.limit),
   hasMore: rows.length > page.limit,
@@ -67,21 +80,29 @@ export class PostgresIndexReader implements IndexReader {
       pattern = literalPattern(q);
     const rows = await this.query<{ data: CodeSymbol; score: number; reason: string }>(
       `
-      WITH candidates AS (
-        SELECT s.*, f.data->>'generated'='true' AS generated,
+      WITH candidates AS MATERIALIZED (
+        SELECT s.*,
           CASE WHEN lower(s.name)=$2 THEN 100 WHEN lower(s.qualified_name)=$2 THEN 95
                WHEN lower(s.name) LIKE $3 THEN 80 WHEN lower(s.name) LIKE $4 THEN 65
                ELSE 50*similarity(lower(s.name),$2) END AS base_score,
           CASE WHEN lower(s.name)=$2 THEN 'exact name' WHEN lower(s.qualified_name)=$2 THEN 'qualified name'
                WHEN lower(s.name) LIKE $3 THEN 'prefix' WHEN lower(s.name) LIKE $4 THEN 'substring'
                ELSE 'trigram' END AS base_reason
-        FROM symbols s JOIN files f ON f.repository_id=s.repository_id AND f.id=s.file_id
+        FROM symbols s
         WHERE s.repository_id=$1 AND (cardinality($5::text[])=0 OR s.data->>'kind'=ANY($5))
           AND (lower(s.name) LIKE $4 OR lower(s.qualified_name)=$2 OR lower(s.name) % $2)
+      ), file_flags AS MATERIALIZED (
+        -- files.data embeds the whole source; read the flag once per candidate file.
+        SELECT f.id, f.data->>'generated'='true' AS generated FROM files f
+        WHERE f.repository_id=$1 AND f.id IN (SELECT DISTINCT file_id FROM candidates)
       ) SELECT data,
         base_score * CASE WHEN data->>'kind' IN ('IMPORT','EXPORT') THEN 0.6 ELSE 1 END * CASE WHEN generated THEN 0.5 ELSE 1 END AS score,
         base_reason || CASE WHEN data->>'kind' IN ('IMPORT','EXPORT') THEN '; alias declaration' ELSE '' END || CASE WHEN generated THEN '; generated penalty' ELSE '' END AS reason
-      FROM candidates ORDER BY score DESC, data->>'file' COLLATE "C", (data->>'startLine')::int, id COLLATE "C"
+      FROM candidates c JOIN file_flags g ON g.id=c.file_id
+      ORDER BY score DESC,
+        CASE WHEN data->>'file' ~ '(^|/)(__tests__|tests?|spec)/|\\.(test|spec)\\.' THEN 1 ELSE 0 END,
+        CASE WHEN data->>'kind' IN ('CLASS','INTERFACE') THEN 0 WHEN data->>'kind' IN ('FUNCTION','METHOD') THEN 1 ELSE 2 END,
+        data->>'file' COLLATE "C", (data->>'startLine')::int, c.id COLLATE "C"
       LIMIT $6 OFFSET $7`,
       [q, `${pattern}%`, `%${pattern}%`, kinds, page.limit + 1, page.offset],
     );
@@ -90,19 +111,54 @@ export class PostgresIndexReader implements IndexReader {
       page,
     );
   }
+  /** Streams matching files in path order and stops once the page is covered, instead
+   * of splitting every matching file before the final sort. Each batch reports how many
+   * matching lines it held, so only the requested window is returned from SQL. Every
+   * matching file holds at least one matching line, so the first batch is sized to cover
+   * the page; later batches grow quickly because each one filters the remaining files. */
   async searchCode(query: string, page: PageRequest) {
     this.checkPage(page);
     const pattern = `%${literalPattern(query.toLowerCase())}%`;
-    const rows = await this.query(
-      `
-      SELECT f.path AS file, l.ordinality::int AS line, left(l.text,500) AS snippet,
-             CASE WHEN f.data->>'generated'='true' THEN 0.5 ELSE 1 END::float8 AS score, 'lexical substring' AS reason
-      FROM files f CROSS JOIN LATERAL regexp_split_to_table(f.data->>'content', E'\\r?\\n') WITH ORDINALITY AS l(text,ordinality)
-      WHERE f.repository_id=$1 AND f.data->>'status'='INDEXED'
-        AND lower(f.data->>'content') LIKE $2 AND lower(l.text) LIKE $2
-      ORDER BY f.path COLLATE "C", l.ordinality LIMIT $3 OFFSET $4`,
-      [pattern, page.limit + 1, page.offset],
-    );
+    const wanted = page.limit + 1,
+      deadline = Date.now() + 4000,
+      rows: SearchCodeRow[] = [];
+    let seen = 0,
+      cursor: string | null = null,
+      batch = Math.min(4096, Math.max(64, page.offset + wanted));
+    while (rows.length < wanted) {
+      if (Date.now() > deadline)
+        throw new CodeMemoryError(
+          "QUERY_TIMEOUT",
+          "Scoped index query exceeded its execution budget; narrow the query",
+        );
+      const skip = Math.max(0, page.offset - seen);
+      const [result]: SearchCodeBatch[] = await this.query<SearchCodeBatch>(
+        `
+        WITH batch AS MATERIALIZED (
+          SELECT path, data->>'content' AS content,
+            CASE WHEN data->>'generated'='true' THEN 0.5 ELSE 1 END::float8 AS score
+          FROM files WHERE repository_id=$1 AND data->>'status'='INDEXED'
+            AND lower(data->>'content') LIKE $2 AND ($3::text IS NULL OR path COLLATE "C" > $3)
+          ORDER BY path COLLATE "C" LIMIT $4
+        ), hits AS MATERIALIZED (
+          SELECT b.path, l.ordinality::int AS line, left(l.text,500) AS snippet, b.score
+          FROM batch b CROSS JOIN LATERAL regexp_split_to_table(b.content, E'\\r?\\n') WITH ORDINALITY AS l(text,ordinality)
+          WHERE lower(l.text) LIKE $2
+        )
+        SELECT (SELECT count(*)::int FROM batch) AS files,
+          (SELECT max(path COLLATE "C") FROM batch) AS last,
+          (SELECT count(*)::int FROM hits) AS hits,
+          (SELECT coalesce(jsonb_agg(jsonb_build_object('file',path,'line',line,'snippet',snippet,'score',score,'reason','lexical substring')
+             ORDER BY path COLLATE "C", line),'[]') FROM (SELECT * FROM hits ORDER BY path COLLATE "C", line OFFSET $5 LIMIT $6) w) AS "pageRows"`,
+        [pattern, cursor, batch, skip, wanted - rows.length],
+      );
+      if (!result) break;
+      rows.push(...result.pageRows);
+      seen += result.hits;
+      if (result.files < batch || result.last === null) break;
+      cursor = result.last;
+      batch = Math.min(batch * 4, 4096);
+    }
     return pageResult(rows, page);
   }
   async symbol(selector: SymbolSelector) {
@@ -112,7 +168,13 @@ export class PostgresIndexReader implements IndexReader {
       SELECT left(array_to_string((regexp_split_to_array(data->>'content', E'\\r?\\n'))[$3:$4], E'\\n'),4000) AS snippet,
         length(array_to_string((regexp_split_to_array(data->>'content', E'\\r?\\n'))[$3:$4], E'\\n'))>4000 AS "characterTruncated",
         (SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1 AND target_id=$5) AS incoming,
-        (SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1 AND source_id=$5) AS outgoing
+        (SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1 AND source_id=$5) AS outgoing,
+        (SELECT coalesce(jsonb_object_agg(edge_type,n),'{}') FROM (SELECT edge_type, count(*)::int AS n
+          FROM symbol_edges WHERE repository_id=$1 AND target_id=$5 GROUP BY edge_type) t) AS "incomingByType",
+        (SELECT coalesce(jsonb_object_agg(edge_type,n),'{}') FROM (SELECT edge_type, count(*)::int AS n
+          FROM symbol_edges WHERE repository_id=$1 AND source_id=$5 GROUP BY edge_type) t) AS "outgoingByType",
+        (SELECT count(*)::int FROM symbol_edges WHERE repository_id=$1 AND target_id=$5
+          AND source_id<>$5 AND edge_type NOT IN ('DECLARES','EXPORTS')) AS "usageIncoming"
       FROM files WHERE repository_id=$1 AND id=$2`,
       [symbol.fileId, symbol.startLine, Math.min(symbol.endLine, symbol.startLine + 15), symbol.id],
     );
@@ -222,8 +284,11 @@ export class PostgresIndexReader implements IndexReader {
     );
   }
   private async qualityMetadata() {
+    // Publish records the total with each run; count rows only for older runs without it.
     const [row] = await this.query<{ count: string }>(
-      "SELECT count(*)::text AS count FROM unresolved_references WHERE repository_id=$1",
+      `SELECT COALESCE(
+        (SELECT (data->'totals'->>'unresolvedReferences')::bigint FROM index_runs WHERE repository_id=$1 ORDER BY id DESC LIMIT 1),
+        (SELECT count(*) FROM unresolved_references WHERE repository_id=$1))::text AS count`,
     );
     return {
       candidateOnly: true,
@@ -403,17 +468,43 @@ export class PostgresIndexReader implements IndexReader {
     const neighbor = direction === "incoming" ? "source_id" : "target_id";
     const paths: string[][] = [],
       queue: string[][] = [[from]],
-      adjacency = new Map<string, string[]>();
+      adjacency = new Map<string, string[]>(),
+      prefetched = new Map<string, string[]>();
     let truncated = false,
       steps = 0,
-      fetched = 0;
+      fetched = 0,
+      head = 0;
     const deadline = Date.now() + 5000;
-    while (queue.length && paths.length < maxPaths && steps++ < 10000) {
+    // Neighbours of every uncached node still queued (the rest of the current BFS
+    // level) load in one statement. Each list holds one row more than the largest
+    // limit it can be committed with, so committing on dequeue below applies the
+    // node, fetched and per-source caps exactly as one query per node would.
+    const prefetch = async (start: number) => {
+      const sources: string[] = [];
+      const room = 128 - adjacency.size;
+      for (let i = start; i < queue.length && sources.length < room; i++) {
+        const path = queue[i] as string[],
+          id = path[path.length - 1] as string;
+        if (path.length > maxDepth || adjacency.has(id) || prefetched.has(id)) continue;
+        if (!sources.includes(id)) sources.push(id);
+      }
+      const rows = await this.query<{ src: string; id: string }>(
+        `SELECT a.src, n.id FROM unnest($2::text[]) WITH ORDINALITY AS a(src, ord)
+         CROSS JOIN LATERAL (SELECT DISTINCT ${neighbor} COLLATE "C" AS id FROM symbol_edges
+           WHERE repository_id=$1 AND ${anchor}=a.src AND (cardinality($3::text[])=0 OR edge_type=ANY($3))
+           ORDER BY id LIMIT $4) n
+         ORDER BY a.ord, n.id`,
+        [sources, types, Math.min(1000, 10000 - fetched) + 1],
+      );
+      for (const id of sources) prefetched.set(id, []);
+      for (const row of rows) prefetched.get(row.src)?.push(row.id);
+    };
+    while (head < queue.length && paths.length < maxPaths && steps++ < 10000) {
       if (Date.now() > deadline) {
         truncated = true;
         break;
       }
-      const path = queue.shift() as string[],
+      const path = queue[head++] as string[],
         last = path[path.length - 1] as string;
       if (path.length > maxDepth) {
         paths.push(path);
@@ -425,13 +516,12 @@ export class PostgresIndexReader implements IndexReader {
           truncated = true;
           break;
         }
+        if (!prefetched.has(last)) await prefetch(head - 1);
         const limit = Math.min(1000, 10000 - fetched);
-        const rows = await this.query<{ id: string }>(
-          `SELECT DISTINCT ${neighbor} COLLATE "C" AS id FROM symbol_edges WHERE repository_id=$1 AND ${anchor}=$2 AND (cardinality($3::text[])=0 OR edge_type=ANY($3)) ORDER BY id LIMIT $4`,
-          [last, types, limit + 1],
-        );
+        const rows = prefetched.get(last) ?? [];
+        prefetched.delete(last);
         if (rows.length > limit) truncated = true;
-        next = rows.slice(0, limit).map((r) => r.id);
+        next = rows.slice(0, limit);
         fetched += next.length;
         adjacency.set(last, next);
       }
@@ -441,13 +531,13 @@ export class PostgresIndexReader implements IndexReader {
         continue;
       }
       for (const id of available) {
-        if (queue.length >= 1000) {
+        if (queue.length - head >= 1000) {
           truncated = true;
           break;
         }
         queue.push([...path, id]);
       }
     }
-    return { paths, truncated: truncated || queue.length > 0 };
+    return { paths, truncated: truncated || head < queue.length };
   }
 }
