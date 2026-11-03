@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A `.codememoryignore` that links outside the project, into a nested repository or nowhere (dangling) now fails the scan with `IGNORE_FILE_OUT_OF_SCOPE` instead of indexing the files it would hide. Such a `.gitignore` is still treated as absent, as git does, but is counted under `exclusions.byReason.IGNORE_FILE_OUT_OF_SCOPE.other` (not `files`) with an `exclusions.diagnostics` entry naming its path. Ignore-file text is stored under the walked path, never the link target.
+- The scanner's nested-repository fast path no longer applies to a path resolved through a symlink, so a directory swapped mid-scan for a link into a nested repository is rejected with `PATH_OUT_OF_SCOPE` again.
 - Migration 11 drops the foreign keys and primary key of `symbol_edges`. Publication now deletes edges of removed symbols itself, matching the former cascade. On 300k real edges this raised edge insert throughput 2.3-2.5x and halved WAL volume.
 - Record the receiver's static class/interface on call edges (`receiverType`) and keep a `find_callers` dispatch row only when that type is an ancestor of the queried member. Calls on a sibling subclass that inherits the base member are no longer reported as possible callers of an override. The analyzer version changes, so existing indexes re-analyze once.
 - evaluate-project: exclude `this` keyword matches and inherited-member calls on sibling receivers from the language-service oracle.

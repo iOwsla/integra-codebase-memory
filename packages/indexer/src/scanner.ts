@@ -50,7 +50,13 @@ export class RepositoryScanner implements FileScanner {
     const files: IndexedFile[] = [];
     const configs = new Map<string, string>();
     let excluded = 0;
-    const exclusions: ExclusionSummary = { files: 0, directories: 0, other: 0, byReason: {} };
+    const diagnostics: { reason: string; path: string; message: string }[] = [];
+    const exclusions: ExclusionSummary & { diagnostics?: typeof diagnostics } = {
+      files: 0,
+      directories: 0,
+      other: 0,
+      byReason: {},
+    };
     const exclude = (kind: "files" | "directories" | "other", reason: string) => {
       excluded++;
       exclusions[kind]++;
@@ -72,13 +78,17 @@ export class RepositoryScanner implements FileScanner {
         ".gitignore",
         ...(dir === context.canonicalRoot ? [".codememoryignore"] : []),
       ]) {
-        const ignorePath = resolve(dir, ignoreName);
+        const ignorePath = resolve(dir, ignoreName),
+          rel = slash(relative(context.canonicalRoot, ignorePath));
+        let outOfScope = false;
         try {
+          // A symlinked ignore file resolves elsewhere, so safePath re-runs the full
+          // nested-repository walk on its target instead of trusting the walked ancestors.
           const p = await safePath(context, ignorePath, { ancestorsVetted: true });
           const s = await lstat(p);
           if (s.size <= 65536) {
             const text = await readFile(p, "utf8");
-            configs.set(slash(relative(context.canonicalRoot, p)), text);
+            configs.set(rel, text);
             rules.push({
               base: dir,
               rules: ignore().add(text),
@@ -86,12 +96,37 @@ export class RepositoryScanner implements FileScanner {
             });
           }
         } catch (e) {
-          if (vanished(e)) continue;
-          // A symlink to a file outside the root is never read; report the gap. Other
-          // errors (EACCES, EIO) stay fatal so ignored secrets are not indexed.
-          if (errorCode(e) !== "PATH_OUT_OF_SCOPE") throw e;
-          exclude("files", "IGNORE_FILE_OUT_OF_SCOPE");
+          if (errorCode(e) === "PATH_OUT_OF_SCOPE") outOfScope = true;
+          else if (!vanished(e)) throw e;
+          else {
+            // Only a missing entry is absent; a dangling or unresolvable link is not. If
+            // lstat itself fails (no search permission on dir), no entry below can be read
+            // either and readdir or the file reads report it.
+            const absent = await lstat(ignorePath).then(
+              () => false,
+              () => true,
+            );
+            if (absent) continue;
+            outOfScope = true;
+          }
         }
+        if (!outOfScope) continue;
+        // .codememoryignore is this tool's privacy control: never index without it.
+        if (ignoreName === ".codememoryignore")
+          throw new CodeMemoryError(
+            "IGNORE_FILE_OUT_OF_SCOPE",
+            `Ignore file ${rel} links outside the project`,
+          );
+        // Git does not follow a symlinked .gitignore either, so its rules are not applied.
+        // Nothing outside the scope is read; the gap is reported instead. Read errors on a
+        // real in-tree ignore file (EACCES, EIO) stay fatal.
+        exclude("other", "IGNORE_FILE_OUT_OF_SCOPE");
+        if (diagnostics.length < 20)
+          diagnostics.push({
+            reason: "IGNORE_FILE_OUT_OF_SCOPE",
+            path: rel,
+            message: `Ignore file ${rel} links outside the project; its rules were not applied (git also ignores a symlinked .gitignore)`,
+          });
       }
       let entries: Dirent[];
       try {
@@ -232,6 +267,7 @@ export class RepositoryScanner implements FileScanner {
       }
     };
     await walk(context.canonicalRoot, []);
+    if (diagnostics.length) exclusions.diagnostics = diagnostics;
     // The language plugin proposes metadata paths; only already-discovered, eligible
     // in-scope JSON files can be read. References never trigger directory traversal.
     const visited = new Set<string>();
