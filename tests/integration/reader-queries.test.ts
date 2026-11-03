@@ -389,14 +389,61 @@ describe("trace_dependencies batching", () => {
       ).toEqual(await legacyTrace("graph", from, direction, depth, maxPaths, types));
   });
 
-  it("issues one adjacency query per depth level", async () => {
+  it("batches adjacency queries within each depth level", async () => {
     const spy = vi.spyOn(client, "query");
     try {
       const result = await reader("graph").trace("n", "outgoing", 3, 100, []);
       expect(result.paths).toHaveLength(100);
-      expect(spy.mock.calls.length).toBeLessThanOrEqual(3 + 2);
+      // 111 nodes expand. Levels of 1 and 10 nodes take one statement each; the
+      // 100-node level is split by the fetched budget into batches of at most 10.
+      const batches = spy.mock.calls.filter((call) =>
+        String(call[0]).includes("unnest($2::text[])"),
+      );
+      expect(batches.length).toBeLessThanOrEqual(2 + 12);
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it("bounds each prefetch batch by the remaining fetched budget", async () => {
+    // 200 callers of the root, each called by 1,500 functions: one level of hubs.
+    await repository("fan");
+    await files("fan", [{ id: "f", path: "fan.ts", content: "" }]);
+    await symbols("fan", [
+      { id: "root", fileId: "f", file: "fan.ts", name: "root", kind: "FUNCTION" },
+    ]);
+    await client.query(
+      `INSERT INTO symbol_edges(repository_id,id,source_id,target_id,file_id,edge_type,data)
+       SELECT 'fan', 'c'||c||'>root', 'c'||c, 'root', 'f', 'CALLS', '{}'::jsonb FROM generate_series(0,199) c
+       UNION ALL
+       SELECT 'fan', 's'||s||'>c'||c, 's'||s, 'c'||c, 'f', 'CALLS', '{}'::jsonb
+       FROM generate_series(0,199) c CROSS JOIN generate_series(0,1499) s`,
+    );
+    const spy = vi.spyOn(client, "query");
+    let result: Awaited<ReturnType<PostgresIndexReader["trace"]>>;
+    try {
+      result = await reader("fan").trace("root", "incoming", 3, 100, []);
+      const batches = spy.mock.calls.flatMap((call, i) =>
+        String(call[0]).includes("unnest($2::text[])")
+          ? [{ params: call[1] as unknown[], result: spy.mock.results[i]?.value }]
+          : [],
+      );
+      expect(batches.length).toBeGreaterThan(1);
+      let rows = 0,
+        sources = 0;
+      for (const batch of batches) {
+        const [, ids, , perSource] = batch.params as [string, string[], string[], number];
+        // At most ceil(remaining / 1000) sources while the per-source limit is 1,000.
+        expect(ids.length * (perSource - 1)).toBeLessThanOrEqual(10000);
+        expect(ids.length).toBeLessThanOrEqual(10);
+        rows += ((await batch.result) as pg.QueryResult).rows.length;
+        sources += ids.length;
+      }
+      expect(rows).toBeLessThanOrEqual(10000 + sources);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(result.truncated).toBe(true);
+    expect(result).toEqual(await legacyTrace("fan", "root", "incoming", 3, 100, []));
   });
 });
