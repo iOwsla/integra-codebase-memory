@@ -355,3 +355,43 @@ export class UserService {
     }),
   );
 });
+
+it("keeps CALLS edges for members a PrismaService subclass declares itself", async () => {
+  const a = await analyze({
+    "prisma/schema.prisma": schema,
+    "prisma.service.ts": `import { PrismaClient } from '@prisma/client';
+export class BaseService extends PrismaClient { tenantHelper() { return 1; } }
+export class PrismaService extends BaseService {
+  cleanDatabase() { return 0; }
+  readonly scoped = () => 2;
+}
+`,
+    "user.service.ts": `import { PrismaService } from './prisma.service';
+export class UserService {
+  constructor(private readonly prisma: PrismaService) {}
+  reset() { return this.prisma.cleanDatabase(); }
+  helper() { return this.prisma.tenantHelper(); }
+  arrow() { return this.prisma.scoped(); }
+  raw() { return this.prisma.$queryRawUnsafe('SELECT 1'); }
+  load() { return this.prisma.user.findMany(); }
+}
+`,
+  });
+  const named = (n: string) => a.symbols.find((s) => s.qualifiedName === n);
+  const calls = (source: string, target: string) =>
+    a.edges.some(
+      (e) => e.type === "CALLS" && e.source === named(source)?.id && e.target === named(target)?.id,
+    );
+  expect(calls("UserService.reset", "PrismaService.cleanDatabase")).toBe(true);
+  expect(calls("UserService.helper", "BaseService.tenantHelper")).toBe(true);
+  expect(calls("UserService.arrow", "PrismaService.scoped")).toBe(true);
+  const unresolved = a.unresolved
+    .filter((u) => u.type === "PRISMA_QUERY")
+    .map((u) => [u.source, u.expression]);
+  expect(unresolved).toEqual([
+    [named("UserService.raw")?.id, "this.prisma.$queryRawUnsafe('SELECT 1')"],
+  ]);
+  expect(
+    a.edges.some((e) => e.type === "PRISMA_QUERY" && e.source === named("UserService.load")?.id),
+  ).toBe(true);
+});

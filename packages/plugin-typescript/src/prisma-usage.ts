@@ -270,6 +270,21 @@ export class PrismaUsage {
     }
     return;
   }
+  /**
+   * A member declared by a project class that extends a Prisma client
+   * (`PrismaService.cleanDatabase()`) is ordinary project code, not a Prisma
+   * query: the caller records the normal CALLS edge for it.
+   */
+  private ownMember(name: ts.MemberName): boolean {
+    const symbol = this.checker.getSymbolAtLocation(name);
+    return (symbol?.declarations ?? []).some((declaration) => {
+      const parent = declaration.parent;
+      return (
+        (ts.isClassDeclaration(parent) || ts.isClassExpression(parent)) &&
+        this.subclass(parent, new Set()) !== undefined
+      );
+    });
+  }
   call(node: ts.CallExpression, owner: CodeSymbol): boolean {
     const binding = this.resolve(node.expression);
     const sf = node.getSourceFile(),
@@ -297,7 +312,8 @@ export class PrismaUsage {
       receiver?.kind === "delegate" ||
       (receiver?.kind === "client" &&
         ts.isPropertyAccessExpression(node.expression) &&
-        node.expression.name.text !== "$transaction")
+        node.expression.name.text !== "$transaction" &&
+        !this.ownMember(node.expression.name))
     ) {
       this.catalog.analysis.unresolved.push({
         id: id(owner.id, "PRISMA_QUERY", String(offset)),
