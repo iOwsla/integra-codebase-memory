@@ -1,10 +1,10 @@
 # Indexing
 
-Discovery prunes excluded trees before reading. Source files are bounded to 2 MiB by default, checked for NUL bytes, hashed with SHA-256 and tagged for generated code. The TypeScript plugin analyzes accepted files using a bounded compiler input map, configured workspace mounts and in-scope reference redirects. See parser.md for configuration ownership and declaration-output mapping. Unresolved references are persisted separately.
+Discovery prunes excluded trees before reading. Source files are bounded to 2 MiB by default, checked for binary content, hashed with SHA-256 and tagged for generated code. The TypeScript plugin analyzes accepted files using a bounded compiler input map, configured workspace mounts and in-scope reference redirects. See parser.md for configuration ownership and declaration-output mapping. Unresolved references are persisted separately.
 
 The index fingerprint combines parser version, schema compatibility, source-selection config and in-scope tsconfig/package text. `.gitignore` and `.codememoryignore` text is not part of the fingerprint: their effect already appears as added or deleted paths, so a comment or rule edit re-analyzes only when the selected file set changes. Reconciliation first reads a compact file hash/status manifest, without loading the graph. A no-op reopen skips all parser and graph writes; operational progress metadata is updated. Otherwise the selected project is conservatively re-analyzed for dependency correctness. Publication hashes each file's semantic records and replaces only relationships whose file hash changed; cross-file effects are included when their semantic records change. File changes and deletion cleanup publish atomically with graph data and an index-run record. Parser diagnostics are returned as incomplete coverage; fatal failures retain the previous graph.
 
-Configuration lives in `.codememory/config.json`. `init` writes documented defaults without replacing an existing config. Supported keys: `maxFileSizeBytes`, `parserTimeoutMs`, `parserOutputLimitMiB`, `include`, `exclude`, `excludeGenerated`, `debounceMs`, `reconcileMs`. Unknown keys fail validation. Restart the process after config changes.
+Configuration lives in `.codememory/config.json`. `init` writes documented defaults without replacing an existing config. Supported keys: `maxFileSizeBytes`, `parserTimeoutMs`, `parserOutputLimitMiB`, `include`, `exclude`, `excludeGenerated`, `debounceMs`, `reconcileMs`. Unknown keys fail validation, and a file that is not valid JSON fails with `CONFIGURATION_ERROR`. Restart the process after config changes.
 
 The watcher reacts to filesystem events after the 300 ms debounce. Its fallback reconciliation scan defaults to every five minutes, reducing idle disk and CPU work in large repositories. A change to `debounceMs`, `reconcileMs` or parser timeout/output limits does not change source analysis and therefore does not invalidate the graph fingerprint. Source selection or parser changes still trigger a full safe reanalysis.
 
@@ -12,11 +12,13 @@ On macOS, the watcher uses the native recursive filesystem subscription and appl
 
 Published file, symbol and relationship totals are recorded with each index run. Status requests read those totals instead of recounting large tables; older generations without saved totals use the original count queries until their next successful index.
 
-Recoverable source read failures are recorded per file and retried on the next index. Durable stage/owner records expose abandoned attempts without deleting the last completed graph. See [hardening](hardening.md).
+A source file is `SKIPPED_BINARY` only when it has a UTF-16 BOM, NUL bytes exceed 10% of its first 8 KiB, or it contains a NUL and is not valid UTF-8. A literal NUL in otherwise valid source is indexed; stored content shows it as a space so offsets stay valid, while the hash covers the raw bytes.
+
+Recoverable source read failures are recorded per file and retried on the next index. A directory or config file removed during a scan is skipped; a vanished config is counted under `CONFIG_VANISHED` in `exclusions.byReason`. A `.gitignore` symlinked outside the root is not read and is counted under `IGNORE_FILE_OUT_OF_SCOPE`. An unreadable directory (`EACCES`, `EPERM`, `EIO`) fails the run with `SCAN_UNREADABLE_DIRECTORY` and the directory's relative path, so its files are never published as deleted; an unreadable ignore file also fails the run so ignored files are not indexed. Durable stage/owner records expose abandoned attempts without deleting the last completed graph. See [hardening](hardening.md).
 
 `parserTimeoutMs` defaults to 120000 and accepts integer milliseconds from 1000 to 600000. This bounds the isolated parser subprocess; it does not change the output cap or SQL query limits. Increase it only when a larger selected project requires a longer analysis window.
 
-The isolated parser transfers newline-delimited records instead of buffering one giant JSON document. `parserOutputLimitMiB` defaults to 1024 and accepts integers from 1 to 8192. It bounds total transferred bytes, not process RAM: the compiler and resulting graph still require memory proportional to the project. Individual incomplete records are bounded to 64 MiB. A truncated stream is never published as a completed index.
+The isolated parser transfers newline-delimited records instead of buffering one giant JSON document. `parserOutputLimitMiB` defaults to 4096 and accepts integers from 1 to 8192. Configs written by `init` before this default changed carry an explicit `1024`; raise or remove that key in `.codememory/config.json` and restart the MCP session. It bounds total transferred bytes, not process RAM: the compiler and resulting graph still require memory proportional to the project. Individual incomplete records are bounded to 64 MiB. A truncated stream is never published as a completed index.
 
 To profile a selected repository without writing to its source tree or application database, run `bun run profile:project --project /absolute/root --query Symbol` from the CodeMemory checkout. This uses a fresh disposable CodeMemory test database at `TEST_DATABASE_URL` (or the development Compose database on port 55432), reports scan, analysis, publication, query and second-pass times, then drops the test database. Add `--force-second` to measure semantic reanalysis and selective publication even when source files do not change. Parent and parser peak RSS are sampled separately; the container has separate memory use. Do not use a production database as the test server.
 
@@ -25,7 +27,7 @@ For larger projects, merge these settings into `.codememory/config.json`, then r
 ```json
 {
   "parserTimeoutMs": 600000,
-  "parserOutputLimitMiB": 2048
+  "parserOutputLimitMiB": 8192
 }
 ```
 

@@ -33,6 +33,11 @@
 - Serve `get_file_outline` and `get_file_context` from the indexed snapshot for files deleted on disk, marked `sourceOnDisk: false`.
 - Include the sanitized tail of parser worker stderr in the error when the worker crashes.
 - Isolate background memory worker failures per project and log their error codes with the project scope.
+- Raise the default `parserOutputLimitMiB` from 1024 to 4096. Configs written by `init` earlier keep an explicit `1024`; raise or remove it to use the new default.
+- Report a `.codememory/config.json` that is not valid JSON as `CONFIGURATION_ERROR` instead of `INTERNAL_ERROR`, and accept a leading UTF-8 BOM.
+- Keep scanning when a directory or config file disappears mid-scan (counted as `CONFIG_VANISHED`) or `.gitignore` is symlinked outside the root (`IGNORE_FILE_OUT_OF_SCOPE`). An unreadable directory now fails with `SCAN_UNREADABLE_DIRECTORY` naming its relative path.
+- Index source files that contain a literal NUL byte instead of skipping them as binary; the NUL is stored as a space. Files with a UTF-16 BOM, mostly-NUL content or invalid UTF-8 with NULs are still skipped.
+- Skip the repeated nested-repository ancestor check for files the scanner already vetted while walking, reducing per-file filesystem calls.
 
 ## 0.1.0-alpha.34 — 2026-11-03
 
