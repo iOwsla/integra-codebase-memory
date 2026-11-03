@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.36 — 2026-11-03
 
 - `search_code` chooses its own file access order instead of relying on the planner, which cannot estimate how often a substring occurs in file content and alternately walked every file for a rare term or decompressed every trigram candidate for a common one. It walks growing path windows while matches are dense and switches to the project's trigram candidates once rechecking them looks cheaper; pages are unchanged. On kiosk-software-last a first page for a common word fell from about 1.2 s to 2–8 ms and for a rare or absent term from about 0.4 s to 14–22 ms; the slowest of 45 measured pages fell from 1.27 s to 0.34 s. On modpos-integra-erp rare terms fell from about 125 ms to 6–16 ms; `prisma.`, absent from the first 520 files in path order, rose from 16 ms to 62 ms. The alpha.35 notes overstated `search_code` (2–15 ms for a common word): that held only when the planner happened to choose the path order.
 - Migration 15 replaces the partial content trigram index with `files_content_repo` on `(repository_id, lower(content))` using the `btree_gin` extension, so a project's candidates no longer include other projects' files. It rebuilds one index (about 5 s for 8,800 files).
