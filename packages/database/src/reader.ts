@@ -234,9 +234,12 @@ export class PostgresIndexReader implements IndexReader {
    * implementation. Only instance members dispatch: constructors and static members
    * keep their direct callers alone, and `super.member()` calls (edge metadata
    * receiver "super") always run the base implementation. Members match by name on a
-   * declared IMPLEMENTS/EXTENDS ancestor. When the call edge records the receiver's
-   * static type, it must itself be one of those ancestors: a sibling subclass that
-   * merely inherits the base member can never be an instance of this class. */
+   * declared IMPLEMENTS/EXTENDS ancestor. Rows expose the edge's recorded receiver
+   * static type as `dispatch.receiverType`. A class receiver that is not one of those
+   * ancestors is dropped. This is a nominal heuristic: TypeScript checks
+   * assignability structurally, so an instance can also be held by a sibling class
+   * that declares no extra members, and such callers are omitted. Interface
+   * receivers, and receivers whose symbol is no longer indexed, are always kept. */
   private async callers(symbol: CodeSymbol, page: PageRequest) {
     const rows = await this.query<{
       data: Record<string, unknown>;
@@ -275,7 +278,9 @@ export class PostgresIndexReader implements IndexReader {
       WHERE t.via IS NULL OR (
         e.data#>>'{metadata,receiver}' IS DISTINCT FROM 'super'
         AND (e.data#>>'{metadata,receiverType}' IS NULL
-          OR e.data#>>'{metadata,receiverType}' IN (SELECT id FROM supers)))
+          OR e.data#>>'{metadata,receiverType}' IN (SELECT id FROM supers)
+          OR NOT EXISTS (SELECT 1 FROM symbols r WHERE r.repository_id=$1
+            AND r.id=e.data#>>'{metadata,receiverType}' AND r.data->>'kind'='CLASS')))
       ORDER BY s.data->>'file' COLLATE "C", (e.data->>'line')::int, e.id COLLATE "C" LIMIT $3 OFFSET $4`,
       [symbol.id, page.limit + 1, page.offset],
     );
@@ -283,7 +288,15 @@ export class PostgresIndexReader implements IndexReader {
       rows.map(({ data, symbol, via }) => ({
         ...data,
         symbol,
-        ...(via ? { dispatch: { via } } : {}),
+        ...(via
+          ? {
+              dispatch: {
+                via,
+                receiverType:
+                  (data.metadata as { receiverType?: string } | undefined)?.receiverType ?? null,
+              },
+            }
+          : {}),
       })),
       page,
     );
@@ -483,10 +496,17 @@ export class PostgresIndexReader implements IndexReader {
     // Neighbours of every uncached node still queued (the rest of the current BFS
     // level) load in one statement. Each list holds one row more than the largest
     // limit it can be committed with, so committing on dequeue below applies the
-    // node, fetched and per-source caps exactly as one query per node would.
+    // node, fetched and per-source caps exactly as one query per node would. A batch
+    // takes only as many sources as the remaining fetched budget can fill at the
+    // per-source limit, so one statement does no more work than the per-node loop
+    // would before stopping.
     const prefetch = async (start: number) => {
       const sources: string[] = [];
-      const room = 128 - adjacency.size;
+      const perSource = Math.min(1000, 10000 - fetched) + 1;
+      const room = Math.min(
+        128 - adjacency.size,
+        Math.max(1, Math.floor((10000 - fetched) / (perSource - 1))),
+      );
       for (let i = start; i < queue.length && sources.length < room; i++) {
         const path = queue[i] as string[],
           id = path[path.length - 1] as string;
@@ -499,7 +519,7 @@ export class PostgresIndexReader implements IndexReader {
            WHERE repository_id=$1 AND ${anchor}=a.src AND (cardinality($3::text[])=0 OR edge_type=ANY($3))
            ORDER BY id LIMIT $4) n
          ORDER BY a.ord, n.id`,
-        [sources, types, Math.min(1000, 10000 - fetched) + 1],
+        [sources, types, perSource],
       );
       for (const id of sources) prefetched.set(id, []);
       for (const row of rows) prefetched.get(row.src)?.push(row.id);

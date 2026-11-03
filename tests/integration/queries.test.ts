@@ -340,8 +340,10 @@ it("lists interface and base-class dispatch callers with their supertype member"
       ["Service.viaUnion", 7, null],
       ["Service.viaPromise", 9, null],
     ]);
-    // super.run() is a direct base call, never a dispatch caller of the override; a
-    // Sibling receiver inherits Base.run but can never be a Sub, while `this` in Base can.
+    // super.run() is a direct base call, never a dispatch caller of the override. A
+    // Sibling class receiver is not an ancestor of Sub, so the nominal heuristic omits
+    // it, although Sub is structurally assignable to the member-less Sibling; `this` in
+    // Base can be a Sub and stays.
     expect(await callers("Sub.run")).toEqual([
       ["Base.twice", 8, "Base.run"],
       ["Service.base", 11, "Base.run"],
@@ -361,6 +363,19 @@ it("lists interface and base-class dispatch callers with their supertype member"
       ["Service.build", 13, null],
     ]);
     expect(await callers("CustomHandler.verify")).toHaveLength(3);
+    // Interface receivers are structural and never filtered: a Labeled value can hold a
+    // Widget, which implements only Named.
+    expect(await callers("Widget.name")).toEqual([["show", 16, "Named.name"]]);
+    const rows = (await service.execute("find_callers", { name: "Widget.name" })).results as {
+      dispatch?: { receiverType: string | null };
+    }[];
+    const labeled = (await service.execute("search_symbols", { query: "Labeled" })).results as {
+      id: string;
+      qualifiedName: string;
+    }[];
+    expect(rows[0]?.dispatch?.receiverType).toBe(
+      labeled.find((s) => s.qualifiedName === "Labeled")?.id,
+    );
   } finally {
     await db.dispose();
   }

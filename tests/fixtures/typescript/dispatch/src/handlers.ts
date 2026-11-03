@@ -11,3 +11,6 @@ export class Static extends Base { static run(): number { return 3; } }
 export class Built { constructor(readonly n: number) {} }
 export class Derived extends Built { constructor() { super(1); } }
 export class Sibling extends Base {}
+export interface Named { name(): string }
+export interface Labeled extends Named { label(): string }
+export class Widget implements Named { name(): string { return 'w'; } label(): string { return 'l'; } }
