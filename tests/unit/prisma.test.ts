@@ -284,3 +284,114 @@ it("reports an unterminated Prisma block comment at its original position", asyn
   );
   expect(a.symbols.filter((s) => s.kind === "MODEL")).toEqual([]);
 });
+
+it("gives each missing pair of a composite relation its own unresolved id", async () => {
+  const a = await analyze({
+    "schema.prisma": [
+      'generator client {\n provider = "prisma-client-js"\n}',
+      "model A {\n id Int @id\n x Int\n y Int\n b B @relation(fields:[p,q], references:[x,y])\n}",
+      "model B {\n x Int\n y Int\n a A[]\n @@id([x,y])\n}",
+      "",
+    ].join("\n"),
+  });
+  const relations = a.unresolved.filter((u) => u.type === "PRISMA_RELATION");
+  expect(relations).toHaveLength(2);
+  expect(relations.map((u) => u.reason)).toEqual([
+    expect.stringContaining("p -> x"),
+    expect.stringContaining("q -> y"),
+  ]);
+  expect(new Set(a.unresolved.map((u) => u.id)).size).toBe(a.unresolved.length);
+});
+
+it("resolves NestJS PrismaService subclasses of generated clients per schema group", async () => {
+  const generator = (output: string) =>
+    schema.replace(
+      'provider = "prisma-client-js"',
+      `provider = "prisma-client"\n output = "${output}"`,
+    );
+  const a = await analyze({
+    "api/package.json": "{}",
+    "api/prisma/schema.prisma": generator("../src/generated/prisma"),
+    "api/tenant/schema.prisma": generator("../src/generated/tenant"),
+    "api/src/common/database/prisma.service.ts": `import { PrismaClient } from '../../generated/prisma/client.js';
+export class PrismaService extends PrismaClient {}
+export const Anonymous = class extends PrismaClient {};
+`,
+    "api/src/common/database/tenant.service.ts": `import { PrismaClient } from '../../generated/tenant/client.js';
+export class TenantService extends PrismaClient {}
+`,
+    "api/src/user/user.service.ts": `import { Anonymous, PrismaService } from '../common/database/prisma.service';
+import { TenantService } from '../common/database/tenant.service';
+export class UserService {
+  constructor(private readonly prisma: PrismaService, private readonly tenant: TenantService) {}
+  load() { return this.prisma.user.findMany({ where: { id: 1 } }); }
+  tenantLoad() { return this.tenant.post.count(); }
+  direct() { return new PrismaService().user.count(); }
+  anonymous() { return new Anonymous().post.count(); }
+}
+`,
+  });
+  const named = (n: string) => a.symbols.find((s) => s.qualifiedName === n);
+  const queries = a.edges.filter((e) => e.type === "PRISMA_QUERY");
+  const query = (source: string) =>
+    queries
+      .filter((e) => e.source === named(source)?.id)
+      .map((e) => {
+        const target = a.symbols.find((s) => s.id === e.target)!;
+        return [target.file, target.name, e.metadata?.operation];
+      });
+  expect(query("UserService.load")).toEqual([["api/prisma/schema.prisma", "User", "findMany"]]);
+  expect(query("UserService.tenantLoad")).toEqual([["api/tenant/schema.prisma", "Post", "count"]]);
+  expect(query("UserService.direct")).toEqual([["api/prisma/schema.prisma", "User", "count"]]);
+  expect(query("UserService.anonymous")).toEqual([["api/prisma/schema.prisma", "Post", "count"]]);
+  const userId = a.symbols.find(
+    (s) => s.file === "api/prisma/schema.prisma" && s.qualifiedName === "User.id",
+  );
+  expect(a.edges).toContainEqual(
+    expect.objectContaining({
+      type: "REFERENCES",
+      source: named("UserService.load")?.id,
+      target: userId?.id,
+    }),
+  );
+});
+
+it("keeps CALLS edges for members a PrismaService subclass declares itself", async () => {
+  const a = await analyze({
+    "prisma/schema.prisma": schema,
+    "prisma.service.ts": `import { PrismaClient } from '@prisma/client';
+export class BaseService extends PrismaClient { tenantHelper() { return 1; } }
+export class PrismaService extends BaseService {
+  cleanDatabase() { return 0; }
+  readonly scoped = () => 2;
+}
+`,
+    "user.service.ts": `import { PrismaService } from './prisma.service';
+export class UserService {
+  constructor(private readonly prisma: PrismaService) {}
+  reset() { return this.prisma.cleanDatabase(); }
+  helper() { return this.prisma.tenantHelper(); }
+  arrow() { return this.prisma.scoped(); }
+  raw() { return this.prisma.$queryRawUnsafe('SELECT 1'); }
+  load() { return this.prisma.user.findMany(); }
+}
+`,
+  });
+  const named = (n: string) => a.symbols.find((s) => s.qualifiedName === n);
+  const calls = (source: string, target: string) =>
+    a.edges.some(
+      (e) => e.type === "CALLS" && e.source === named(source)?.id && e.target === named(target)?.id,
+    );
+  expect(calls("UserService.reset", "PrismaService.cleanDatabase")).toBe(true);
+  expect(calls("UserService.helper", "BaseService.tenantHelper")).toBe(true);
+  expect(calls("UserService.arrow", "PrismaService.scoped")).toBe(true);
+  const unresolved = a.unresolved
+    .filter((u) => u.type === "PRISMA_QUERY")
+    .map((u) => [u.source, u.expression]);
+  expect(unresolved).toEqual([
+    [named("UserService.raw")?.id, "this.prisma.$queryRawUnsafe('SELECT 1')"],
+  ]);
+  expect(
+    a.edges.some((e) => e.type === "PRISMA_QUERY" && e.source === named("UserService.load")?.id),
+  ).toBe(true);
+});

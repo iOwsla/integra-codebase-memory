@@ -107,7 +107,7 @@ export interface Analysis {
   diagnostics: {
     file: string;
     message: string;
-    kind?: "SYNTAX_ERROR" | "CONFIGURATION";
+    kind?: "SYNTAX_ERROR" | "CONFIGURATION" | "ANALYSIS_ERROR";
     line?: number;
     column?: number;
     code?: number;

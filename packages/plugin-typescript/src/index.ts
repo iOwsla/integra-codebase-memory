@@ -32,10 +32,36 @@ export interface ParserProfileEvent {
   unresolved?: number;
 }
 
+/** Per-file semantic failures tolerated before the whole analysis fails. */
+const MAX_ANALYSIS_ERRORS = 20;
+
+type Edge = Analysis["edges"][number];
+/**
+ * Calls on one line to the same target share an edge id. Keep the most
+ * permissive receiver metadata so dispatch queries never drop a real caller:
+ * `receiver: "super"` survives only if every call was a super call, and
+ * `receiverType` only if every call recorded the same type.
+ */
+function mergeCallEdges(previous: Edge, next: Edge): Edge {
+  const a = previous.metadata ?? {},
+    b = next.metadata ?? {};
+  const metadata: Record<string, unknown> = {};
+  if (a.receiver === "super" && b.receiver === "super") metadata.receiver = "super";
+  else if (
+    a.receiver === undefined &&
+    b.receiver === undefined &&
+    a.receiverType !== undefined &&
+    a.receiverType === b.receiverType
+  )
+    metadata.receiverType = a.receiverType;
+  const { metadata: _discarded, ...rest } = next;
+  return Object.keys(metadata).length ? { ...rest, metadata } : rest;
+}
+
 /** Compiler input is an in-memory allowlist produced by the bounded scanner. */
 export class TypeScriptPlugin implements LanguagePlugin {
   readonly id = "typescript";
-  readonly version = `10:prisma2:${ts.version}`;
+  readonly version = `11:prisma3:${ts.version}`;
   readonly configurationReferences = configurationReferences;
   readonly extensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts", ".prisma"];
   constructor(
@@ -49,7 +75,8 @@ export class TypeScriptPlugin implements LanguagePlugin {
   ): Promise<Analysis> {
     const clock = () => (this.profile ? performance.now() : 0);
     const begun = clock();
-    let completedFiles = 0;
+    let completedFiles = 0,
+      analysisErrors = 0;
     const result: Analysis = { symbols: [], edges: [], unresolved: [], diagnostics: [] };
     const prisma = new PrismaCatalog(context, files, configs, result);
     const workspace = new CompilerWorkspace(
@@ -63,12 +90,16 @@ export class TypeScriptPlugin implements LanguagePlugin {
     const declarations = new Map<string, Map<number, CodeSymbol>>();
     const fileSymbols = new Map<string, CodeSymbol>();
     const sourcePaths = new WeakMap<ts.SourceFile, string>();
-    const declarationTable = (sf: ts.SourceFile) => {
+    const sourcePath = (sf: ts.SourceFile) => {
       let path = sourcePaths.get(sf);
       if (path === undefined) {
         path = resolve(sf.fileName);
         sourcePaths.set(sf, path);
       }
+      return path;
+    };
+    const declarationTable = (sf: ts.SourceFile) => {
+      const path = sourcePath(sf);
       let table = declarations.get(path);
       if (table === undefined) {
         table = new Map<number, CodeSymbol>();
@@ -76,11 +107,16 @@ export class TypeScriptPlugin implements LanguagePlugin {
       }
       return table;
     };
+    // A SourceFile starts at its first token, which is also the start of its first
+    // statement. Files therefore resolve through fileSymbols, never the offset table,
+    // so a module symbol (`import * as ns`) cannot land on the first declaration.
     const getDeclaration = (node: ts.Node) => {
+      if (ts.isSourceFile(node)) return fileSymbols.get(sourcePath(node));
       const sf = node.getSourceFile();
       return declarationTable(sf).get(node.getStart(sf));
     };
     const setDeclaration = (node: ts.Node, symbol: CodeSymbol) => {
+      if (ts.isSourceFile(node)) return;
       const sf = node.getSourceFile();
       declarationTable(sf).set(node.getStart(sf), symbol);
     };
@@ -409,145 +445,167 @@ export class TypeScriptPlugin implements LanguagePlugin {
           root = fileSymbols.get(path);
         if (!sf || !root) continue;
         const fileStart = clock();
-        for (const d of program.getSyntacticDiagnostics(sf)) {
-          const location =
-            d.start === undefined ? undefined : sf.getLineAndCharacterOfPosition(d.start);
-          result.diagnostics.push({
-            kind: "SYNTAX_ERROR",
-            code: d.code,
-            ...(location ? { line: location.line + 1, column: location.character + 1 } : {}),
-            file: root.file,
-            message: truncateUnicode(ts.flattenDiagnosticMessageText(d.messageText, " "), 2000),
-          });
-        }
-        const lineOf = (node: ts.Node) =>
-          sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-        const unresolved = (node: ts.Node, owner: CodeSymbol, type: string) => {
-          const offset = node.getStart(sf);
-          const line = sf.getLineAndCharacterOfPosition(offset).line + 1;
-          result.unresolved.push({
-            id: id(owner.id, type, String(offset), String(node.getEnd())),
-            source: owner.id,
-            fileId: owner.fileId,
-            line,
-            expression: truncateUnicode(
-              sf.text.slice(offset, Math.min(node.getEnd(), offset + 300)),
-              300,
-            ),
-            reason: "Dynamic, external, excluded, or not statically resolved within project scope",
-            type,
-          });
-        };
-        const visit = (node: ts.Node, parent: CodeSymbol, caller: CodeSymbol) => {
-          const owner =
-            (classify(node) || ts.isFunctionLike(node) ? getDeclaration(node) : undefined) ??
-            parent;
-          // Declaration containment and execution ownership are different: a local
-          // initializer runs in its surrounding function, not in its variable.
-          const callOwner =
-            ts.isFunctionLike(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node)
-              ? owner
-              : caller;
-          if (
-            ts.isCallExpression(node) &&
-            (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-              (ts.isIdentifier(node.expression) &&
-                node.expression.text === "require" &&
-                unshadowed(node.expression)))
-          ) {
-            const argument = node.arguments[0];
-            const symbol =
-              argument && ts.isStringLiteralLike(argument)
-                ? checker.getSymbolAtLocation(argument)
-                : undefined;
-            const sourceFile = symbol?.declarations?.find(ts.isSourceFile);
-            const target = sourceFile ? fileSymbols.get(resolve(sourceFile.fileName)) : undefined;
-            if (target) addEdge(owner, target, "IMPORTS", lineOf(node), "SEMANTIC_CONFIRMED");
-            else unresolved(node, owner, "IMPORTS");
-          } else if (ts.isCallExpression(node) && prismaUsage?.call(node, callOwner)) {
-            // Prisma query edges carry the model, operation and exact call location.
-          } else if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
-            let target: CodeSymbol | undefined;
-            const signature = checker.getResolvedSignature(node);
-            if (signature?.declaration) target = getDeclaration(signature.declaration);
-            target ??= targetOf(
-              ts.isPropertyAccessExpression(node.expression)
-                ? node.expression.name
-                : node.expression,
-            );
-            // super.member() invokes exactly the base implementation; it never dispatches.
-            // Otherwise record the receiver's static class/interface so dispatch queries
-            // can rule out overrides the receiver type cannot reach.
-            const callee = node.expression;
-            const metadata = !ts.isPropertyAccessExpression(callee)
-              ? undefined
-              : callee.expression.kind === ts.SyntaxKind.SuperKeyword
-                ? { receiver: "super" }
-                : receiverType(callee.expression);
-            if (target)
-              addEdge(callOwner, target, "CALLS", lineOf(node), "SEMANTIC_CONFIRMED", metadata);
-            else unresolved(node, callOwner, "CALLS");
+        const edgeCount = result.edges.length,
+          unresolvedCount = result.unresolved.length;
+        try {
+          for (const d of program.getSyntacticDiagnostics(sf)) {
+            const location =
+              d.start === undefined ? undefined : sf.getLineAndCharacterOfPosition(d.start);
+            result.diagnostics.push({
+              kind: "SYNTAX_ERROR",
+              code: d.code,
+              ...(location ? { line: location.line + 1, column: location.character + 1 } : {}),
+              file: root.file,
+              message: truncateUnicode(ts.flattenDiagnosticMessageText(d.messageText, " "), 2000),
+            });
           }
-          if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
-            const spec = node.moduleSpecifier;
-            if (spec) {
-              const symbol = checker.getSymbolAtLocation(spec);
+          const lineOf = (node: ts.Node) =>
+            sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+          const unresolved = (node: ts.Node, owner: CodeSymbol, type: string) => {
+            const offset = node.getStart(sf);
+            const line = sf.getLineAndCharacterOfPosition(offset).line + 1;
+            result.unresolved.push({
+              id: id(owner.id, type, String(offset), String(node.getEnd())),
+              source: owner.id,
+              fileId: owner.fileId,
+              line,
+              expression: truncateUnicode(
+                sf.text.slice(offset, Math.min(node.getEnd(), offset + 300)),
+                300,
+              ),
+              reason:
+                "Dynamic, external, excluded, or not statically resolved within project scope",
+              type,
+            });
+          };
+          const visit = (node: ts.Node, parent: CodeSymbol, caller: CodeSymbol) => {
+            const owner =
+              (classify(node) || ts.isFunctionLike(node) ? getDeclaration(node) : undefined) ??
+              parent;
+            // Declaration containment and execution ownership are different: a local
+            // initializer runs in its surrounding function, not in its variable.
+            const callOwner =
+              ts.isFunctionLike(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node)
+                ? owner
+                : caller;
+            if (
+              ts.isCallExpression(node) &&
+              (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+                (ts.isIdentifier(node.expression) &&
+                  node.expression.text === "require" &&
+                  unshadowed(node.expression)))
+            ) {
+              const argument = node.arguments[0];
+              const symbol =
+                argument && ts.isStringLiteralLike(argument)
+                  ? checker.getSymbolAtLocation(argument)
+                  : undefined;
               const sourceFile = symbol?.declarations?.find(ts.isSourceFile);
               const target = sourceFile ? fileSymbols.get(resolve(sourceFile.fileName)) : undefined;
+              if (target) addEdge(owner, target, "IMPORTS", lineOf(node), "SEMANTIC_CONFIRMED");
+              else unresolved(node, owner, "IMPORTS");
+            } else if (ts.isCallExpression(node) && prismaUsage?.call(node, callOwner)) {
+              // Prisma query edges carry the model, operation and exact call location.
+            } else if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+              let target: CodeSymbol | undefined;
+              const signature = checker.getResolvedSignature(node);
+              if (signature?.declaration) target = getDeclaration(signature.declaration);
+              target ??= targetOf(
+                ts.isPropertyAccessExpression(node.expression)
+                  ? node.expression.name
+                  : node.expression,
+              );
+              // super.member() invokes exactly the base implementation; it never dispatches.
+              // Otherwise record the receiver's static class/interface so dispatch queries
+              // can rule out overrides the receiver type cannot reach.
+              const callee = node.expression;
+              const metadata = !ts.isPropertyAccessExpression(callee)
+                ? undefined
+                : callee.expression.kind === ts.SyntaxKind.SuperKeyword
+                  ? { receiver: "super" }
+                  : receiverType(callee.expression);
               if (target)
-                addEdge(
-                  root,
-                  target,
-                  ts.isImportDeclaration(node) ? "IMPORTS" : "RE_EXPORTS",
-                  lineOf(node),
-                  "SEMANTIC_CONFIRMED",
-                );
-              else unresolved(node, root, "IMPORTS");
+                addEdge(callOwner, target, "CALLS", lineOf(node), "SEMANTIC_CONFIRMED", metadata);
+              else unresolved(node, callOwner, "CALLS");
             }
-          }
-          if (
-            ts.isBinaryExpression(node) &&
-            node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-            commonJsExport(node.left)
-          ) {
-            const target = getDeclaration(node.right) ?? targetOf(node.right);
-            if (target) {
-              target.exported = true;
-              addEdge(root, target, "EXPORTS", lineOf(node), "AST_CONFIRMED");
-            } else unresolved(node, root, "EXPORTS");
-          }
-          if (ts.isExportSpecifier(node)) {
-            const target = targetOf(node.name);
-            if (target) addEdge(root, target, "EXPORTS", lineOf(node), "SEMANTIC_CONFIRMED");
-          }
-          if (ts.isExportAssignment(node)) {
-            const target = targetOf(node.expression);
-            if (target) addEdge(root, target, "EXPORTS", lineOf(node), "SEMANTIC_CONFIRMED");
-          }
-          if (ts.isHeritageClause(node))
-            for (const type of node.types) {
-              const target = targetOf(type.expression);
-              if (target)
-                addEdge(
-                  owner,
-                  target,
-                  node.token === ts.SyntaxKind.ExtendsKeyword ? "EXTENDS" : "IMPLEMENTS",
-                  lineOf(node),
-                  "SEMANTIC_CONFIRMED",
-                );
-              else unresolved(type, owner, "HERITAGE");
+            if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+              const spec = node.moduleSpecifier;
+              if (spec) {
+                const symbol = checker.getSymbolAtLocation(spec);
+                const sourceFile = symbol?.declarations?.find(ts.isSourceFile);
+                const target = sourceFile
+                  ? fileSymbols.get(resolve(sourceFile.fileName))
+                  : undefined;
+                if (target)
+                  addEdge(
+                    root,
+                    target,
+                    ts.isImportDeclaration(node) ? "IMPORTS" : "RE_EXPORTS",
+                    lineOf(node),
+                    "SEMANTIC_CONFIRMED",
+                  );
+                else unresolved(node, root, "IMPORTS");
+              }
             }
-          if (ts.isIdentifier(node)) {
-            const isDeclaration =
-              !ts.isPropertyAccessExpression(node.parent) &&
-              (node.parent as ts.NamedDeclaration).name === node;
-            const target = isDeclaration ? undefined : targetOf(node);
-            if (target && target.id !== owner.id)
-              addEdge(owner, target, "REFERENCES", lineOf(node), "SEMANTIC_CONFIRMED");
-          }
-          ts.forEachChild(node, (n) => visit(n, owner, callOwner));
-        };
-        ts.forEachChild(sf, (n) => visit(n, root, root));
+            if (
+              ts.isBinaryExpression(node) &&
+              node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+              commonJsExport(node.left)
+            ) {
+              const target = getDeclaration(node.right) ?? targetOf(node.right);
+              if (target) {
+                target.exported = true;
+                addEdge(root, target, "EXPORTS", lineOf(node), "AST_CONFIRMED");
+              } else unresolved(node, root, "EXPORTS");
+            }
+            if (ts.isExportSpecifier(node)) {
+              const target = targetOf(node.name);
+              if (target) addEdge(root, target, "EXPORTS", lineOf(node), "SEMANTIC_CONFIRMED");
+            }
+            if (ts.isExportAssignment(node)) {
+              const target = targetOf(node.expression);
+              if (target) addEdge(root, target, "EXPORTS", lineOf(node), "SEMANTIC_CONFIRMED");
+            }
+            if (ts.isHeritageClause(node))
+              for (const type of node.types) {
+                const target = targetOf(type.expression);
+                if (target)
+                  addEdge(
+                    owner,
+                    target,
+                    node.token === ts.SyntaxKind.ExtendsKeyword ? "EXTENDS" : "IMPLEMENTS",
+                    lineOf(node),
+                    "SEMANTIC_CONFIRMED",
+                  );
+                else unresolved(type, owner, "HERITAGE");
+              }
+            if (ts.isIdentifier(node)) {
+              const isDeclaration =
+                !ts.isPropertyAccessExpression(node.parent) &&
+                (node.parent as ts.NamedDeclaration).name === node;
+              const target = isDeclaration ? undefined : targetOf(node);
+              if (target && target.id !== owner.id)
+                addEdge(owner, target, "REFERENCES", lineOf(node), "SEMANTIC_CONFIRMED");
+            }
+            ts.forEachChild(node, (n) => visit(n, owner, callOwner));
+          };
+          ts.forEachChild(sf, (n) => visit(n, root, root));
+        } catch (error) {
+          // A checker failure on one file (e.g. a TypeScript "Debug Failure") drops
+          // that file's partial relationships but keeps the rest of the project.
+          // Many failures suggest a corrupted checker, so the job fails instead.
+          if (++analysisErrors > MAX_ANALYSIS_ERRORS) throw error;
+          result.edges.length = edgeCount;
+          result.unresolved.length = unresolvedCount;
+          result.diagnostics.push({
+            kind: "ANALYSIS_ERROR",
+            file: root.file,
+            message: truncateUnicode(
+              `Semantic analysis failed: ${error instanceof Error ? error.message : String(error)}`,
+              2000,
+            ),
+          });
+        }
         this.profile?.({
           phase: "SEMANTIC_FILE",
           completedFiles: ++completedFiles,
@@ -559,9 +617,17 @@ export class TypeScriptPlugin implements LanguagePlugin {
       }
     }
     const dedupStart = clock();
-    const edges = new Map<string, Analysis["edges"][number]>();
-    for (const edge of result.edges) edges.set(edge.id, edge);
+    const edges = new Map<string, Edge>();
+    for (const edge of result.edges) {
+      const previous = edges.get(edge.id);
+      edges.set(edge.id, previous && edge.type === "CALLS" ? mergeCallEdges(previous, edge) : edge);
+    }
     result.edges = [...edges.values()];
+    // Unresolved ids are primary keys at publish; keep the first record per id.
+    const unresolved = new Map<string, Analysis["unresolved"][number]>();
+    for (const reference of result.unresolved)
+      if (!unresolved.has(reference.id)) unresolved.set(reference.id, reference);
+    result.unresolved = [...unresolved.values()];
     this.profile?.({
       phase: "DEDUPLICATION",
       durationMs: clock() - dedupStart,

@@ -54,3 +54,45 @@ it("loads the ES5 default library (lib.d.ts) for built-in generics", async () =>
     await f.dispose();
   }
 });
+
+it("merges receiver metadata permissively when calls on one line share a CALLS edge", async () => {
+  const f = await fixture({
+    "tsconfig.json": '{"compilerOptions":{"strict":true},"include":["src"]}',
+    "src/main.ts": [
+      "export class Base { save() {} }",
+      "export class A extends Base {}",
+      "export class B extends Base { save() {} }",
+      "export class C extends Base {",
+      "  thisThenSuper() { this.save(); super.save(); }",
+      "  superThenThis() { super.save(); this.save(); }",
+      "  bothSuper() { super.save(); super.save(); }",
+      "}",
+      "export function mixed(base: Base, a: A) { const r = [base.save(), a.save()]; return r; }",
+      "export function same(base: Base, other: Base) { return [base.save(), other.save()]; }",
+      "",
+    ].join("\n"),
+  });
+  try {
+    const context = await createProjectContext(f.root),
+      plugin = new TypeScriptPlugin(),
+      scan = await new RepositoryScanner().scan(context, plugin.configurationReferences),
+      a = await plugin.analyze(context, scan.files, scan.configs);
+    const named = (n: string) => a.symbols.find((s) => s.qualifiedName === n)?.id;
+    const call = (source: string) => {
+      const edges = a.edges.filter(
+        (e) => e.type === "CALLS" && e.source === named(source) && e.target === named("Base.save"),
+      );
+      expect(edges).toHaveLength(1);
+      return edges[0]!;
+    };
+    // A receiver of type A or Base may reach B.save, so no receiverType may survive.
+    expect(call("mixed").metadata).toBeUndefined();
+    expect(call("same").metadata).toEqual({ receiverType: named("Base") });
+    // A super call never dispatches, but a this-call on the same line can.
+    expect(call("C.thisThenSuper").metadata).toBeUndefined();
+    expect(call("C.superThenThis").metadata).toBeUndefined();
+    expect(call("C.bothSuper").metadata).toEqual({ receiver: "super" });
+  } finally {
+    await f.dispose();
+  }
+});
