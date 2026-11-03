@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.34 — 2026-11-03
 
-- Load TypeScript standard-library declarations from CodeMemory's own TypeScript package during analysis. Member calls through `Record`, `Promise` and other built-in generics now resolve instead of being recorded as unresolved; library declarations are never indexed. The analyzer version changes, so existing indexes re-analyze once.
-- Report interface and base-class dispatch in `find_callers`: calls through a supertype member the method implements or overrides are listed with `dispatch.via`.
-- Add `scripts/evaluate-project.ts`, a read-only quality and latency evaluation that compares relationship results with the TypeScript language service and can index an unreleased build into a disposable database.
+- Load TypeScript standard-library declarations (`lib.d.ts` and `lib.*.d.ts`) from CodeMemory's own TypeScript package during analysis. Member calls through `Record`, `Promise` and other built-in generics now resolve instead of being recorded as unresolved; library declarations are never indexed. The analyzer version changes, so existing indexes re-analyze once.
+- Report interface and base-class dispatch in `find_callers`: calls through a supertype member an instance method implements or overrides are listed with `dispatch.via`. Constructors, static members and `super.member()` calls never dispatch; `super` call edges carry `receiver: "super"` metadata.
+- Add `scripts/evaluate-project.ts`, a read-only quality and latency evaluation that compares relationship results with the TypeScript language service. Its `--unmanaged` mode indexes an unreleased build into a disposable database only.
 
 ## 0.1.0-alpha.33 — 2026-09-27
 
