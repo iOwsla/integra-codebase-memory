@@ -28,6 +28,9 @@ const indexLockActive = (pid: string, scope: string) =>
         AND l.classid::bigint=((hashtextextended(${scope},0)>>32)&4294967295)
         AND l.objid::bigint=(hashtextextended(${scope},0)&4294967295) AND l.objsubid=1)`;
 const keptIndexRuns = 20;
+// Migration 10 adds the files metadata columns that migrate() backfills after committing.
+const fileMetadataMigration = 10;
+const migrationLockTimeout = "30s";
 export class PostgresStore extends MemoryWorkflowRepository implements ProjectStore {
   constructor(
     url = process.env.DATABASE_URL ?? defaultDatabaseUrl,
@@ -88,6 +91,11 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
     try {
       await c.query("BEGIN");
       await c.query("SELECT pg_advisory_xact_lock(hashtextextended('codememory:migrations',0))");
+      // The owned pool's 30 s statement budget is sized for queries, not for DDL on a populated
+      // volume (an index build reads every file row). Lift it for this transaction, but bound
+      // lock waits so an ALTER queued behind a long publish fails instead of blocking readers.
+      await c.query("SET LOCAL statement_timeout = 0");
+      await c.query(`SET LOCAL lock_timeout = '${migrationLockTimeout}'`);
       await c.query(
         "CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
       );
@@ -107,6 +115,43 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
       throw e;
     } finally {
       c.release();
+    }
+    if (through >= fileMetadataMigration) {
+      try {
+        await this.backfillFileMetadata();
+      } catch (error) {
+        // Readers fall back to the jsonb fields while a column is NULL; the next migrate resumes.
+        log("warn", "file_metadata_backfill_incomplete", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+  /**
+   * Fills migration 10's metadata columns for rows written before it, in short autocommitted
+   * batches so no statement rewrites the whole table or holds locks for long. Each batch
+   * advances a keyset cursor, so a row whose jsonb lacks a status cannot make it loop.
+   */
+  async backfillFileMetadata(batchSize = 500) {
+    let after: { repository_id: string; id: string } | undefined;
+    for (;;) {
+      const keys = (
+        await this.pool.query<{ repository_id: string; id: string }>(
+          `SELECT repository_id,id FROM files WHERE file_status IS NULL
+           ${after ? "AND (repository_id,id)>($2,$3)" : ""} ORDER BY repository_id,id LIMIT $1`,
+          after ? [batchSize, after.repository_id, after.id] : [batchSize],
+        )
+      ).rows;
+      if (!keys.length) return;
+      // file_status IS NULL is rechecked so a concurrent publish's explicit values win.
+      await this.pool.query(
+        `UPDATE files f SET hash=f.data->>'hash',file_status=f.data->>'status',analysis_hash=f.data->>'analysisHash'
+         FROM unnest($1::text[],$2::text[]) k(repository_id,id)
+         WHERE f.repository_id=k.repository_id AND f.id=k.id AND f.file_status IS NULL`,
+        [keys.map((k) => k.repository_id), keys.map((k) => k.id)],
+      );
+      after = keys[keys.length - 1];
+      if (keys.length < batchSize) return;
     }
   }
   async register(c: ProjectContext) {
@@ -204,10 +249,11 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
             [c.projectScopeId],
           )
         ).rows[0];
-        // Generated columns: reading jsonb fields would detoast every file's stored content.
+        // Metadata columns: reading jsonb fields would detoast every file's stored content.
+        // COALESCE evaluates the jsonb fallback only for rows not yet backfilled.
         const files = (
           await conn.query<IndexState["files"][number]>(
-            "SELECT path,hash,file_status AS status FROM files WHERE repository_id=$1",
+            "SELECT path,COALESCE(hash,data->>'hash') AS hash,COALESCE(file_status,data->>'status') AS status FROM files WHERE repository_id=$1",
             [c.projectScopeId],
           )
         ).rows;
@@ -295,7 +341,10 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
           });
       };
       const previous = (
-        await this.query("SELECT id,path,analysis_hash FROM files WHERE repository_id=$1", [scope])
+        await this.query(
+          "SELECT id,path,COALESCE(analysis_hash,data->>'analysisHash') AS analysis_hash FROM files WHERE repository_id=$1",
+          [scope],
+        )
       ).rows as { id: string; path: string; analysis_hash: string | null }[];
       const previousHashes = new Map(previous.map((file) => [file.id, file.analysis_hash]));
       const digests = new Map(s.files.map((file) => [file.id, createHash("sha256")]));
@@ -369,7 +418,7 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
       await timed("files", changedFiles.length, () =>
         batches(
           changedFiles,
-          `INSERT INTO files(repository_id,id,path,data) SELECT $1,j->>'id',j->>'path',j FROM jsonb_array_elements($2::jsonb) j ON CONFLICT(repository_id,id) DO UPDATE SET data=EXCLUDED.data,path=EXCLUDED.path WHERE files.data IS DISTINCT FROM EXCLUDED.data OR files.path IS DISTINCT FROM EXCLUDED.path`,
+          `INSERT INTO files(repository_id,id,path,hash,file_status,analysis_hash,data) SELECT $1,j->>'id',j->>'path',j->>'hash',j->>'status',j->>'analysisHash',j FROM jsonb_array_elements($2::jsonb) j ON CONFLICT(repository_id,id) DO UPDATE SET data=EXCLUDED.data,path=EXCLUDED.path,hash=EXCLUDED.hash,file_status=EXCLUDED.file_status,analysis_hash=EXCLUDED.analysis_hash WHERE files.data IS DISTINCT FROM EXCLUDED.data OR files.path IS DISTINCT FROM EXCLUDED.path OR files.file_status IS NULL`,
         ),
       );
       // An unaffected file's analysisHash covers all of its symbol rows, so they are already

@@ -1,3 +1,5 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { IndexResult, ProjectContext, Snapshot } from "@codememory/core";
 import { PostgresStore } from "@codememory/database";
 import { IndexService, RepositoryScanner } from "@codememory/indexer";
@@ -226,6 +228,72 @@ it("samples unresolved references in id order without loading the snapshot", asy
         .sort()
         .slice(0, 100),
     );
+  } finally {
+    await db.dispose();
+    await p.f.dispose();
+  }
+});
+
+it("adds migration 10's file metadata without rewriting files and backfills it in batches", async () => {
+  const db = await testDatabase();
+  const p = await project(db, "export function alpha(){return 1}\n");
+  const metadata = async () =>
+    (
+      await db.store.pool.query(
+        `SELECT path,hash,file_status,analysis_hash,data->>'hash' AS data_hash,data->>'status' AS data_status,
+           data->>'analysisHash' AS data_analysis_hash FROM files WHERE repository_id=$1 ORDER BY path`,
+        [p.c.projectScopeId],
+      )
+    ).rows;
+  const relfilenode = async () =>
+    (await db.store.pool.query("SELECT relfilenode FROM pg_class WHERE relname='files'")).rows[0]
+      .relfilenode as number;
+  try {
+    const state = await db.store.indexState(p.c);
+    // Rebuild the pre-migration-10 schema around the already indexed rows.
+    await db.store.pool.query(`
+      DROP INDEX files_metadata_pending, files_path_c;
+      ALTER TABLE files DROP COLUMN hash, DROP COLUMN file_status, DROP COLUMN analysis_hash;
+      ALTER TABLE repositories DROP COLUMN version_floor;
+      CREATE INDEX symbols_fuzzy ON symbols USING gin(name gin_trgm_ops);
+      DELETE FROM schema_migrations WHERE version=10`);
+    const before = await relfilenode();
+    await db.store.migrate();
+    // Adding nullable columns is catalog-only: a table rewrite would allocate a new relfilenode.
+    expect(await relfilenode()).toBe(before);
+    const rows = await metadata();
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.hash).toBe(row.data_hash);
+      expect(row.file_status).toBe(row.data_status);
+      expect(row.analysis_hash).toBe(row.data_analysis_hash);
+      expect(row.file_status).toBe("INDEXED");
+    }
+    expect(await db.store.indexState(p.c)).toEqual(state);
+
+    // Readers fall back to the jsonb fields until a row is backfilled.
+    await db.store.pool.query(
+      "UPDATE files SET hash=NULL,file_status=NULL,analysis_hash=NULL WHERE repository_id=$1",
+      [p.c.projectScopeId],
+    );
+    expect(await db.store.indexState(p.c)).toEqual(state);
+    // A row without a status stays pending but cannot stall the keyset cursor.
+    await db.store.pool.query(
+      "UPDATE files SET data=data-'status' WHERE repository_id=$1 AND path='a.ts'",
+      [p.c.projectScopeId],
+    );
+    await db.store.backfillFileMetadata(1);
+    const [a, b] = await metadata();
+    expect(a).toMatchObject({ path: "a.ts", file_status: null, hash: a!.data_hash });
+    expect(b).toMatchObject({ path: "b.ts", file_status: "INDEXED", hash: b!.data_hash });
+
+    // Publication writes the columns explicitly, including for a row still pending backfill.
+    await writeFile(join(p.f.root, "a.ts"), "export function alpha(){return 2}\n");
+    await p.index.index();
+    const [published] = await metadata();
+    expect(published).toMatchObject({ path: "a.ts", file_status: "INDEXED" });
+    expect(published!.hash).toBe(published!.data_hash);
+    expect(published!.analysis_hash).toBe(published!.data_analysis_hash);
   } finally {
     await db.dispose();
     await p.f.dispose();
