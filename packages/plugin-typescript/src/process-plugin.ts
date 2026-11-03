@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { homedir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 import type { Analysis, IndexedFile, ProjectContext } from "@codememory/core";
@@ -6,12 +7,32 @@ import { CodeMemoryError } from "@codememory/core";
 import { type ParserProfileEvent, TypeScriptPlugin } from "./index";
 
 const STDERR_TAIL_BYTES = 8 * 1024;
-/** Sanitize the stderr tail: drop control characters and project-absolute prefixes. */
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Replace `prefix` only where it ends at a path boundary, so /a/proj leaves /a/project2 alone. */
+function replacePathPrefix(text: string, prefix: string, replacement: string) {
+  const pattern = new RegExp(`${escapeRegExp(prefix)}(?=[/\\\\]|$|[\\s:'"()\\[\\]])`, "g");
+  return text.replace(pattern, replacement);
+}
+/**
+ * Redact absolute paths in parser stderr: paths under the project root become root-relative
+ * (the bare root becomes `.`), the home directory becomes `~`, and any other absolute (POSIX or
+ * Windows) directory chain collapses to `…/` plus the basename.
+ */
+export function redactStderrPaths(input: string, root?: string, home = homedir()) {
+  let text = input;
+  const projectRoot = root?.replace(/[/\\]+$/, "");
+  if (projectRoot) {
+    text = text.replace(new RegExp(`${escapeRegExp(projectRoot)}[/\\\\]`, "g"), "");
+    text = replacePathPrefix(text, projectRoot, ".");
+  }
+  if (home && home !== "/") text = replacePathPrefix(text, home.replace(/[/\\]+$/, ""), "~");
+  return text.replace(/(?<![\w.~-])(?:[A-Za-z]:)?[\\/](?:[^\s:'"()\\/]+[\\/])+/g, "…/");
+}
+/** Sanitize the stderr tail: drop control characters and redact absolute paths. */
 function stderrTail(buffer: Buffer, root?: string) {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are stripped deliberately.
-  let text = buffer.toString("utf8").replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
-  if (root) text = text.split(`${root}/`).join("").split(root).join(".");
-  return text.replace(/\s+/g, " ").trim();
+  const text = buffer.toString("utf8").replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
+  return redactStderrPaths(text, root).replace(/\s+/g, " ").trim();
 }
 /** One parser subprocess per index job keeps MCP initialization/status responsive. */
 export class ProcessTypeScriptPlugin extends TypeScriptPlugin {

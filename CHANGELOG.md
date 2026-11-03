@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Parser crash messages in `codebase_status` no longer expose absolute paths: the project root becomes `.` only at a path boundary (a sibling such as `/a/project2` is no longer rewritten to `./ject2`), the home directory becomes `~`, and other absolute POSIX or Windows paths collapse to `…/` plus the file name.
 - Migration 11 drops the foreign keys and primary key of `symbol_edges`. Publication now deletes edges of removed symbols itself, matching the former cascade. On 300k real edges this raised edge insert throughput 2.3-2.5x and halved WAL volume.
 - Record the receiver's static class/interface on call edges (`receiverType`) and keep a `find_callers` dispatch row only when that type is an ancestor of the queried member. Calls on a sibling subclass that inherits the base member are no longer reported as possible callers of an override. The analyzer version changes, so existing indexes re-analyze once.
 - evaluate-project: exclude `this` keyword matches and inherited-member calls on sibling receivers from the language-service oracle.
