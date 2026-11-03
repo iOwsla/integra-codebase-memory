@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
@@ -80,22 +80,69 @@ export async function activatePointer(root: string) {
     JSON.stringify({ format: 1, root, version: manifest.version }),
   );
 }
-/** Install the stable dispatcher before Docker/WSL can request a reboot. */
+/** A lock may be empty only between its exclusive create and the owner write. */
+const lockGraceMs = 10000;
+async function lockOwner(path: string, previous: string) {
+  try {
+    const owner = JSON.parse(previous);
+    if (Number.isInteger(owner?.pid) && owner.pid > 0) return owner.pid as number;
+  } catch {}
+  const info = await stat(path).catch(() => {
+    throw new Error("Update lock changed; retry");
+  });
+  if (Date.now() - info.mtimeMs <= lockGraceMs)
+    throw new Error("Another CodeMemory update is active; wait for it to finish");
+  return null;
+}
+
+export async function updateLock<T>(action: () => Promise<T>) {
+  const path = resolve(managementDirectory(), "update.lock");
+  await checkLocalPath(path);
+  await mkdir(managementDirectory(), { recursive: true, mode: 0o700 });
+  const token = JSON.stringify({ pid: process.pid, token: randomUUID() });
+  try {
+    await writeFile(path, token, { flag: "wx", mode: 0o600 });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    const previous = await readFile(path, "utf8");
+    // An empty or unparseable lock older than the grace period was left by a crashed writer.
+    const pid = await lockOwner(path, previous);
+    let alive = pid !== null;
+    if (pid !== null)
+      try {
+        process.kill(pid, 0);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ESRCH") alive = false;
+      }
+    if (alive) throw new Error("Another CodeMemory update is active; wait for it to finish");
+    if ((await readFile(path, "utf8")) !== previous) throw new Error("Update lock changed; retry");
+    await rm(path);
+    await writeFile(path, token, { flag: "wx", mode: 0o600 });
+  }
+  try {
+    return await action();
+  } finally {
+    if ((await readFile(path, "utf8").catch(() => "")) === token) await rm(path);
+  }
+}
+
+/**
+ * Install the stable dispatcher before Docker/WSL can request a reboot. With `activate`, the shared launchers are rewritten under the update lock, which also recovers
+ * a lock left by a killed writer. Activation calls it with `activate = false` while it already
+ * holds that lock.
+ */
 export async function installManagementCli(
   activate = true,
   onWrite?: (path: string, content: string) => void,
 ) {
+  if (activate) return updateLock(() => writeManagementCli(true, onWrite));
+  return writeManagementCli(false, onWrite);
+}
+async function writeManagementCli(
+  activate: boolean,
+  onWrite?: (path: string, content: string) => void,
+) {
   if (activate) {
-    if (
-      await readFile(resolve(managementDirectory(), "update.lock"), "utf8").then(
-        () => true,
-        (e: NodeJS.ErrnoException) => {
-          if (e.code !== "ENOENT") throw e;
-          return false;
-        },
-      )
-    )
-      throw new Error("Another CodeMemory update is active; wait before changing shared launchers");
     const current = await activeRuntime().catch(() => null);
     const manifest = JSON.parse(await readFile(resolve(runtimeRoot, "package.json"), "utf8"));
     if (current && current.version !== manifest.version)

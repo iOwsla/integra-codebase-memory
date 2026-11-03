@@ -267,3 +267,149 @@ async function publish(store: PostgresStore, c: ProjectContext, s: Snapshot) {
   };
   await store.locked(c, (locked) => locked.publish(c, s, [], [], run));
 }
+
+/** Rows as stored, for restoring a graph that an older release would have written. */
+async function rawGraph(t: Indexed) {
+  const rows = async (table: string) =>
+    (
+      await t.db.store.pool.query(`SELECT * FROM ${table} WHERE repository_id=$1`, [
+        t.c.projectScopeId,
+      ])
+    ).rows;
+  return {
+    files: await rows("files"),
+    symbols: await rows("symbols"),
+    symbol_edges: await rows("symbol_edges"),
+    unresolved_references: await rows("unresolved_references"),
+  };
+}
+const metadataDrift = async (t: Indexed) =>
+  (
+    await t.db.store.pool.query(
+      `SELECT path FROM files WHERE repository_id=$1 AND (hash IS DISTINCT FROM data->>'hash'
+         OR file_status IS DISTINCT FROM data->>'status' OR analysis_hash IS DISTINCT FROM data->>'analysisHash')`,
+      [t.c.projectScopeId],
+    )
+  ).rows.map((r) => r.path as string);
+
+it("keeps file metadata columns in step with data written by an alpha.34 publisher", async () => {
+  const v1 = "export function alpha(){return 1}\n";
+  const v2 = "export function alpha(){return 2}\nexport function beta(){return 3}\n";
+  const t = await indexed({
+    "a.ts": v1,
+    "b.ts": "import {alpha} from './a';\nexport function useAlpha(){return alpha()}\n",
+  });
+  try {
+    const g1 = await graph(t);
+    await writeFile(resolve(t.f.root, "a.ts"), v2);
+    await t.index.index();
+    const v2Rows = await rawGraph(t);
+    const g2 = await graph(t);
+    await writeFile(resolve(t.f.root, "a.ts"), v1);
+    await t.index.index();
+    expect(await graph(t)).toEqual(g1);
+
+    // alpha.34 republishes a.ts as v2: its upsert writes only data and path, and it replaces
+    // the graph rows itself. The columns must follow data at once.
+    const scope = t.c.projectScopeId;
+    const a2 = v2Rows.files.find((row) => row.path === "a.ts");
+    await t.db.store.pool.query(
+      "INSERT INTO files(repository_id,id,path,data) VALUES($1,$2,$3,$4) ON CONFLICT(repository_id,id) DO UPDATE SET data=EXCLUDED.data,path=EXCLUDED.path",
+      [scope, a2.id, a2.path, a2.data],
+    );
+    for (const table of ["symbol_edges", "symbols", "unresolved_references"] as const) {
+      await t.db.store.pool.query(`DELETE FROM ${table} WHERE repository_id=$1`, [scope]);
+      await t.db.store.pool.query(
+        `INSERT INTO ${table} SELECT * FROM jsonb_populate_recordset(NULL::${table},$1::jsonb)`,
+        [JSON.stringify(v2Rows[table])],
+      );
+    }
+    expect(await metadataDrift(t)).toEqual([]);
+    await writeFile(resolve(t.f.root, "a.ts"), v2);
+    expect((await t.index.index()).reason).toBe("UNCHANGED");
+    expect(await metadataDrift(t)).toEqual([]);
+    expect(await graph(t)).toEqual(g2);
+
+    // Reverting the source must replace the v2 graph, not match stale v1 hashes.
+    await writeFile(resolve(t.f.root, "a.ts"), v1);
+    expect((await t.index.index()).reason).not.toBe("UNCHANGED");
+    expect(await graph(t)).toEqual(g1);
+    expect(await metadataDrift(t)).toEqual([]);
+    expect((await t.index.index()).reason).toBe("UNCHANGED");
+  } finally {
+    await t.dispose();
+  }
+});
+
+it("repairs metadata columns that drifted from data on the next publish of the file", async () => {
+  const t = await indexed({
+    "a.ts": "export function alpha(){return 1}\n",
+    "b.ts": "export function gamma(){return 3}\n",
+  });
+  try {
+    // Without the trigger (as between migrations 10 and 12), stale columns survive a data
+    // write; the publish upsert itself must still repair them.
+    await t.db.store.pool.query("ALTER TABLE files DISABLE TRIGGER files_metadata_from_data");
+    await t.db.store.pool.query(
+      "UPDATE files SET hash='stale',analysis_hash='stale' WHERE repository_id=$1 AND path='a.ts'",
+      [t.c.projectScopeId],
+    );
+    expect(await metadataDrift(t)).toEqual(["a.ts"]);
+    await t.index.index();
+    expect(await metadataDrift(t)).toEqual([]);
+    expect((await t.index.index()).reason).toBe("UNCHANGED");
+  } finally {
+    await t.dispose();
+  }
+});
+
+/** Captures the structured log events written to stderr. */
+function spyLog() {
+  const events: Record<string, unknown>[] = [];
+  const write = process.stderr.write.bind(process.stderr);
+  vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown, ...rest: unknown[]) => {
+    if (typeof chunk === "string")
+      for (const line of chunk.split("\n"))
+        try {
+          events.push(JSON.parse(line));
+        } catch {}
+    return (write as (...a: unknown[]) => boolean)(chunk, ...rest);
+  }) as typeof process.stderr.write);
+  return () => events.filter((e) => e.event === "index_statistics_refreshed");
+}
+
+it("refreshes planner statistics only for tables a publish changed substantially", async () => {
+  const t = await indexed({
+    "a.ts": "export function alpha(){return 1}\n",
+    "b.ts": "import {alpha} from './a';\nexport function useAlpha(){return alpha()}\n",
+    "c.ts": "export function gamma(){return 3}\n",
+    "d.ts": "export function delta(){return 4}\n",
+  });
+  try {
+    await t.db.store.pool.query("ANALYZE files, symbols, symbol_edges, unresolved_references");
+    const refreshed = spyLog();
+    // One edited file in a 4-file project is far below the shared tables' thresholds.
+    await writeFile(resolve(t.f.root, "c.ts"), "export function gamma(){return 30}\n");
+    expect((await t.index.index()).reason).toMatch(/PROJECT_SEMANTIC_REANALYSIS/);
+    expect(refreshed()).toEqual([]);
+
+    // A bulk publication of more edges than the row floor analyzes only symbol_edges.
+    const s = await t.db.store.snapshot(t.c);
+    const symbol = s.symbols[0] as { id: string; fileId: string };
+    const edges = Array.from({ length: 12000 }, (_, i) => ({
+      id: `bulk-${i}`,
+      source: symbol.id,
+      target: symbol.id,
+      fileId: symbol.fileId,
+      type: "CALLS",
+    }));
+    await publish(t.db.store, t.c, {
+      ...s,
+      version: s.version + 1,
+      edges: [...s.edges, ...edges],
+    } as Snapshot);
+    expect(refreshed()).toEqual([expect.objectContaining({ tables: ["symbol_edges"] })]);
+  } finally {
+    await t.dispose();
+  }
+});

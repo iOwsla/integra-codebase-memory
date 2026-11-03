@@ -147,6 +147,29 @@ export class IndexService {
 /** Schedules that only retry earlier work; they honor the failure backoff. */
 const RETRY_REASONS = new Set(["reconcile", "queued", "lock-retry", "watch-error"]);
 const MAX_FAILURE_BACKOFF_MS = 3600000;
+const CONNECTION_ERROR_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENOTFOUND",
+  "EPIPE",
+  "57P01",
+  "57P02",
+  "57P03",
+]);
+/**
+ * Errors that a later retry can succeed on without any source change: an unmigrated database
+ * (fixed by setup) or an unavailable one. They must not wait out the exponential backoff.
+ */
+function environmentError(error: unknown) {
+  if (error instanceof CodeMemoryError) return error.code === "SCHEMA_OUTDATED";
+  const code = (error as { code?: unknown } | undefined)?.code;
+  if (typeof code === "string" && (CONNECTION_ERROR_CODES.has(code) || code.startsWith("08")))
+    return true;
+  const message = error instanceof Error ? error.message : "";
+  return /Connection terminated|timeout exceeded when trying to connect/i.test(message);
+}
 export class ProjectSession {
   private watcher?: FSWatcher | NativeWatcher;
   private timer?: ReturnType<typeof setTimeout>;
@@ -224,10 +247,10 @@ export class ProjectSession {
         ignored,
         awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 25 },
       });
-      watcher.on("all", (_event, path) => {
-        this.watchError = undefined;
-        this.schedule(path);
-      });
+      // Chokidar never retries a path whose watch failed (ENOSPC, EMFILE, EACCES), so events
+      // from the paths still watched must not clear the error: watching stays partial and the
+      // affected area is only found by reconcile until the session restarts.
+      watcher.on("all", (_event, path) => this.schedule(path));
       // Chokidar keeps running after non-fatal errors; record them and reconcile.
       watcher.on("error", (error) => this.watchFailed(error));
       this.watcher = watcher;
@@ -305,6 +328,13 @@ export class ProjectSession {
           const delay = Math.min(30000, 1000 * 2 ** Math.min(this.busyAttempts++, 5));
           this.retryNotBefore = Date.now() + delay;
           this.schedule("lock-retry", delay);
+        } else if (environmentError(e)) {
+          // Like BUSY, the cause is outside the source: retry once per reconcile interval so a
+          // session recovers soon after the database is migrated or reachable again.
+          const delay = this.context.effectiveConfig.reconcileMs;
+          this.failureRetryNotBefore = Date.now() + delay;
+          this.schedule("queued", delay);
+          await this.store.recordFailure(this.context, this.lastError).catch(() => {});
         } else {
           // Unchanged input fails the same way; back off retries until a real change arrives.
           const delay =

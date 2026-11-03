@@ -152,4 +152,18 @@ BEGIN
     EXECUTE format('ALTER TABLE symbol_edges DROP CONSTRAINT %I', c.conname);
   END LOOP;
 END $$;`,
+  // Readers prefer migration 10's metadata columns over data, but a release before them (or
+  // manual SQL) rewrites only data, leaving the columns stale for good. Deriving them from the
+  // incoming row on every data write works like a generated column without a table rewrite,
+  // and needs no OLD/NEW comparison (publication's NEW.data was just built in memory).
+  // PostgresStore.migrate repairs rows that drifted before this trigger existed.
+  `CREATE FUNCTION files_metadata_from_data() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.hash := NEW.data->>'hash';
+  NEW.file_status := NEW.data->>'status';
+  NEW.analysis_hash := NEW.data->>'analysisHash';
+  RETURN NEW;
+END $$;
+CREATE TRIGGER files_metadata_from_data BEFORE INSERT OR UPDATE OF data ON files
+  FOR EACH ROW EXECUTE FUNCTION files_metadata_from_data();`,
 ];

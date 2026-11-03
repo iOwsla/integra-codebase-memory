@@ -161,7 +161,11 @@ it("reports a RUNNING job without a live lock as interrupted, not updating", asy
     // While the recorded backend holds the project lock, the job is still reported as updating.
     await db.store.locked(p.c, async () => {
       await db.store.pool.query(
-        `UPDATE index_jobs SET backend_pid=(SELECT pid FROM pg_locks WHERE locktype='advisory' AND granted LIMIT 1) WHERE repository_id=$1`,
+        // pg_locks spans the whole cluster: match this database and this project's lock key.
+        `UPDATE index_jobs SET backend_pid=(SELECT pid FROM pg_locks WHERE locktype='advisory' AND granted
+          AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) AND objsubid=1
+          AND classid::bigint=((hashtextextended($1,0)>>32)&4294967295)
+          AND objid::bigint=(hashtextextended($1,0)&4294967295)) WHERE repository_id=$1`,
         [p.c.projectScopeId],
       );
       expect(await metadata()).toMatchObject({ freshness: "UPDATING", incomplete: true });

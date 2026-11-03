@@ -205,9 +205,14 @@ until its client connection is closed.
 Reconnect open clients after success: the updater cannot force an editor to reload
 its cached MCP launch arguments. A client that keeps respawning a legacy cached
 command must be closed/reopened. The updater does not delete databases, restart
-PostgreSQL, or index registered projects. Alpha.17 needs no schema migration;
-future schema changes must use the documented `system setup` migration flow
-before expecting the new runtime to query that database.
+PostgreSQL, or index registered projects. After stopping the old MCP processes and
+before switching the active runtime, it applies pending migrations to the managed
+database; if a migration fails, the previous runtime stays active. Migrations are
+forward-compatible, so the previous runtime keeps working on the migrated schema.
+For a project that uses an external `DATABASE_URL`, the updater only checks the
+schema version and refuses to activate until `bun scripts/migrate.ts` has been run
+against that database. A runtime that finds an unmigrated database reports
+`SCHEMA_OUTDATED`; run `codememory system setup` (managed) or `bun scripts/migrate.ts`.
 
 `BUSY` means another writer holds the project lock, not a parser failure. MCP retry
 delay backs off to 30 seconds. Queries served while changes or a running/interrupted

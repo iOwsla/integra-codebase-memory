@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { PostgresStore, requiredSchemaVersion } from "@codememory/database";
 import { newerRelease } from "@codememory/shared";
 import { installProject } from "../install-project";
 import { runtimeRoot } from "../runtime-root";
@@ -14,6 +15,7 @@ import {
   managementDirectory,
   type Registration,
   saveRegistration,
+  updateLock,
 } from "./cli-state";
 import {
   managedRuntimeRoots,
@@ -21,52 +23,50 @@ import {
   stopOwnedProcesses,
   verifiedRuntime,
 } from "./processes";
-import { checkLocalPath } from "./service-state";
+import { checkLocalPath, databaseUrl, readService } from "./service-state";
 
-/** A lock may be empty only between its exclusive create and the owner write. */
-const lockGraceMs = 10000;
-async function lockOwner(path: string, previous: string) {
-  try {
-    const owner = JSON.parse(previous);
-    if (Number.isInteger(owner?.pid) && owner.pid > 0) return owner.pid as number;
-  } catch {}
-  const info = await stat(path).catch(() => {
-    throw new Error("Update lock changed; retry");
-  });
-  if (Date.now() - info.mtimeMs <= lockGraceMs)
-    throw new Error("Another CodeMemory update is active; wait for it to finish");
-  return null;
-}
+export { updateLock };
 
-export async function updateLock<T>(action: () => Promise<T>) {
-  const path = resolve(managementDirectory(), "update.lock");
-  await checkLocalPath(path);
-  await mkdir(managementDirectory(), { recursive: true, mode: 0o700 });
-  const token = JSON.stringify({ pid: process.pid, token: randomUUID() });
-  try {
-    await writeFile(path, token, { flag: "wx", mode: 0o600 });
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-    const previous = await readFile(path, "utf8");
-    // An empty or unparseable lock older than the grace period was left by a crashed writer.
-    const pid = await lockOwner(path, previous);
-    let alive = pid !== null;
-    if (pid !== null)
-      try {
-        process.kill(pid, 0);
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === "ESRCH") alive = false;
-      }
-    if (alive) throw new Error("Another CodeMemory update is active; wait for it to finish");
-    if ((await readFile(path, "utf8")) !== previous) throw new Error("Update lock changed; retry");
-    await rm(path);
-    await writeFile(path, token, { flag: "wx", mode: 0o600 });
+/**
+ * Bring the databases of the activated projects to this runtime's schema before its pointer is
+ * published: the new runtime's indexing queries columns that recent migrations add. The managed
+ * database is migrated in place (never via setupServices, which recreates the container and
+ * cannot be rolled back). An external database is only checked, because activation must not
+ * migrate a database it does not own. Migrations 10-12 are forward-compatible with alpha.34
+ * (added nullable columns, dropped edge constraints that alpha.34 never relies on, a trigger
+ * that fills the new columns), so an activation that fails afterwards and keeps the old
+ * runtime active on the new schema is safe.
+ */
+export async function migrateRuntimeDatabases(
+  projects: Registration[],
+  options: { managedUrl?: () => Promise<string>; externalUrl?: string } = {},
+) {
+  if (projects.some((p) => p.managed)) {
+    const store = new PostgresStore(
+      await (options.managedUrl ?? (async () => databaseUrl(await readService())))(),
+    );
+    try {
+      await store.migrate();
+    } finally {
+      await store.close();
+    }
   }
+  if (!projects.some((p) => !p.managed)) return;
+  const store = new PostgresStore(options.externalUrl);
+  let version: number;
   try {
-    return await action();
+    version = await store.schemaVersion();
+  } catch {
+    // An unreachable external database cannot be checked here; the runtime reports
+    // SCHEMA_OUTDATED on its first index instead of a raw query error.
+    return "Could not check the external DATABASE_URL schema; if this release added migrations, run bun scripts/migrate.ts against it before indexing.";
   } finally {
-    if ((await readFile(path, "utf8").catch(() => "")) === token) await rm(path);
+    await store.close();
   }
+  if (version < requiredSchemaVersion)
+    throw new Error(
+      `External database schema is at migration ${version}, this release needs ${requiredSchemaVersion}. Run bun scripts/migrate.ts with that DATABASE_URL (or codememory system setup for the managed service), then retry the update.`,
+    );
 }
 
 /**
@@ -201,6 +201,10 @@ export async function activateInstalledRuntime(
         stopping.set(candidate.pid, candidate);
       const stopped = await stopOwnedProcesses([...stopping.values()]);
       checkpoint();
+      // After the old sessions stopped, so none holds a lock the migration would wait on. A
+      // failure throws into the rollback below and keeps the previous pointer.
+      const databaseNote = await migrateRuntimeDatabases(present);
+      checkpoint();
       await activatePointer(runtimeRoot);
       onWrite(activePath, await readFile(activePath, "utf8"));
       // Bridges follow the pointer: an interruption must never leave the active root forwarding
@@ -223,7 +227,7 @@ export async function activateInstalledRuntime(
         skippedMissingProjects: skipped,
         skippedDisabledProjects: disabled,
         backupDirectory,
-        next: "Reconnect open MCP clients. Every shared project now starts the active runtime. No project was indexed by this update.",
+        next: `Reconnect open MCP clients. Every shared project now starts the active runtime.${present.some((p) => p.managed) ? " The managed database was migrated." : ""} No project was indexed by this update.${databaseNote ? ` ${databaseNote}` : ""}`,
       };
     } catch (error) {
       // Restore only our own completed writes, never overwrite a concurrent user edit.
