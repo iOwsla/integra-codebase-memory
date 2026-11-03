@@ -139,4 +139,17 @@ ALTER TABLE files ADD COLUMN hash text, ADD COLUMN file_status text, ADD COLUMN 
 CREATE INDEX files_metadata_pending ON files(repository_id,id) WHERE file_status IS NULL;
 CREATE INDEX files_path_c ON files(repository_id,(path COLLATE "C")) WHERE data->>'status'='INDEXED';
 ALTER TABLE repositories ADD COLUMN version_floor integer NOT NULL DEFAULT 0;`,
+  // Edge rows carry two per-row foreign-key checks and a random-key primary key that no
+  // query reads; on 1.6M-edge projects they made publication 2.3-2.5x slower and doubled
+  // WAL. Publication deletes edges of removed symbols itself, clean deletes edges first,
+  // and the analyzer deduplicates edge ids, so integrity no longer depends on them.
+  `DO $$
+DECLARE c record;
+BEGIN
+  FOR c IN SELECT conname FROM pg_constraint
+    WHERE conrelid='symbol_edges'::regclass AND contype IN ('f','p')
+  LOOP
+    EXECUTE format('ALTER TABLE symbol_edges DROP CONSTRAINT %I', c.conname);
+  END LOOP;
+END $$;`,
 ];

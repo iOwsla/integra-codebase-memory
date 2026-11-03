@@ -22,7 +22,7 @@ One watcher belongs to one process. Changes are debounced; one index job runs at
 
 The MCP transport is installed before auto-index work. Parsing runs in a subprocess so initialization/status requests can proceed. An unready graph raises `INDEX_NOT_READY`. Existing graphs are read as completed snapshots under REPEATABLE READ while a replacement is built. Parser diagnostics and skipped files mark query responses `incomplete`.
 
-Unchanged source/config/parser fingerprints skip parsing and graph writes. Semantic changes currently use a conservative whole-selected-project re-analysis and report the reason. Deletions remove symbols and rebuild dependent edges; composite foreign keys reject dangling/cross-project edges. Code cleanup preserves memory.
+Unchanged source/config/parser fingerprints skip parsing and graph writes. Semantic changes currently use a conservative whole-selected-project re-analysis and report the reason. Deletions remove symbols and rebuild dependent edges. Edge rows have no foreign keys (they cost most of the publish time on large projects); publication deletes the edges of every removed symbol in the same transaction, every edge is written with the publishing project's `repository_id`, and the analyzer only emits targets among that project's own symbols, so dangling or cross-project edges are not produced. Code cleanup preserves memory.
 
 ## Acceptance evidence
 

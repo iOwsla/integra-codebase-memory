@@ -208,6 +208,54 @@ it("publishes an analysis with duplicate unresolved-reference ids", async () => 
   }
 });
 
+it("stores edges without foreign keys or a primary key", async () => {
+  const t = await indexed({ "a.ts": "export function alpha(){return 1}\n" });
+  try {
+    const constraints = await t.db.store.pool.query(
+      "SELECT contype FROM pg_constraint WHERE conrelid='symbol_edges'::regclass",
+    );
+    expect(constraints.rows).toEqual([]);
+  } finally {
+    await t.dispose();
+  }
+});
+
+it("deletes edges into a removed symbol from an unaffected file, like the former cascade", async () => {
+  const t = await indexed({
+    "a.ts": "export function alpha(){return 1}\nexport function beta(){return 2}\n",
+    "b.ts": "import {alpha} from './a';\nexport function useAlpha(){return alpha()}\n",
+  });
+  try {
+    const store = t.db.store;
+    const s = await store.snapshot(t.c);
+    const alpha = s.symbols.find((x) => x.qualifiedName === "alpha")!;
+    const into = (rows: { target: string }[]) => rows.filter((e) => e.target === alpha.id);
+    const bEdges = s.edges.filter((e) => e.fileId !== alpha.fileId);
+    expect(into(bEdges)).not.toEqual([]);
+    // Snapshot rows come back from jsonb with normalized key order, so republish them once to
+    // align the stored per-file digests; afterwards b.ts is unaffected by the edit to a.ts.
+    await publish(store, t.c, { ...s, version: s.version + 1 });
+    const statements = spyQueries();
+    await publish(store, t.c, {
+      ...s,
+      symbols: s.symbols.filter((x) => x.id !== alpha.id),
+      edges: s.edges.filter(
+        (e) => e.fileId !== alpha.fileId || (e.source !== alpha.id && e.target !== alpha.id),
+      ),
+      version: s.version + 2,
+    });
+    const edgeInserts = statements.filter((q) => q.text.startsWith("INSERT INTO symbol_edges"));
+    expect(edgeInserts.flatMap(payload).map((e) => e.fileId)).not.toContain(bEdges[0]!.fileId);
+    const stored = (await store.snapshot(t.c)).edges as { source: string; target: string }[];
+    expect(into(stored)).toEqual([]);
+    expect(stored.filter((e) => e.source === alpha.id)).toEqual([]);
+    // b.ts edges that point elsewhere survive.
+    expect(stored.some((e) => bEdges.some((b) => b.id === (e as { id?: string }).id))).toBe(true);
+  } finally {
+    await t.dispose();
+  }
+});
+
 async function publish(store: PostgresStore, c: ProjectContext, s: Snapshot) {
   const run: IndexResult = {
     version: s.version,

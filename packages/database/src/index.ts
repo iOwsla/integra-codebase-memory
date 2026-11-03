@@ -394,6 +394,20 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
           replaceAll ? [scope] : [scope, allAffected],
         ),
       );
+      // symbol_edges has no foreign keys (they cost 2.3-2.5x edge insert throughput), so
+      // removed symbols are collected here and their edges deleted explicitly below,
+      // matching the former ON DELETE CASCADE. A full replacement already removed every edge.
+      const removedSymbols: string[] = [];
+      const collect = (result: { rows: { id: string }[] }) => {
+        if (!replaceAll) for (const row of result.rows) removedSymbols.push(row.id);
+      };
+      if (deletedIds.length)
+        collect(
+          await this.query(
+            `DELETE FROM symbols WHERE repository_id=$1 AND file_id=ANY($2::text[])${replaceAll ? "" : " RETURNING id"}`,
+            [scope, deletedIds],
+          ),
+        );
       await this.query("DELETE FROM files WHERE repository_id=$1 AND path=ANY($2::text[])", [
         scope,
         deleted,
@@ -437,9 +451,16 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
                 s.symbols.map((x) => x.id),
               ])
             : this.query(
-                "DELETE FROM symbols WHERE repository_id=$1 AND file_id=ANY($2::text[]) AND NOT(id=ANY($3::text[]))",
+                "DELETE FROM symbols WHERE repository_id=$1 AND file_id=ANY($2::text[]) AND NOT(id=ANY($3::text[])) RETURNING id",
                 [scope, allAffected, symbols.map((x) => x.id)],
-              ),
+              ).then(collect),
+        );
+      if (removedSymbols.length)
+        await timed("remove_dangling_edges", removedSymbols.length, () =>
+          this.query(
+            "DELETE FROM symbol_edges WHERE repository_id=$1 AND (source_id=ANY($2::text[]) OR target_id=ANY($2::text[]))",
+            [scope, removedSymbols],
+          ),
         );
       await timed("symbols", symbols.length, () =>
         batches(

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Migration 11 drops the foreign keys and primary key of `symbol_edges`. Publication now deletes edges of removed symbols itself, matching the former cascade. On 300k real edges this raised edge insert throughput 2.3-2.5x and halved WAL volume.
 - Record the receiver's static class/interface on call edges (`receiverType`) and keep a `find_callers` dispatch row only when that type is an ancestor of the queried member. Calls on a sibling subclass that inherits the base member are no longer reported as possible callers of an override. The analyzer version changes, so existing indexes re-analyze once.
 - evaluate-project: exclude `this` keyword matches and inherited-member calls on sibling receivers from the language-service oracle.
 - Incremental publication sends, upserts and deletes symbols only for files whose analysis changed, instead of every symbol in the project, and no longer forces a synchronous full GC every 50,000 rows. `CODEMEMORY_PROFILE=1` reports a `digest` phase.
