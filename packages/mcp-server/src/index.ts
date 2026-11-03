@@ -9,6 +9,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 
+const SESSION_CLOSE_DEADLINE_MS = 10000;
 export function response(value: Record<string, unknown>, offset = 0) {
   let text = JSON.stringify(value);
   if (Buffer.byteLength(text) > 65536 && Array.isArray(value.results)) {
@@ -292,6 +293,33 @@ export function createMcpServer(
   }
   return server;
 }
+/** One background tick. A failing project must not stop work for the projects after it. */
+export async function runBackgroundWork(
+  services: Pick<CodebaseService, "context" | "memoryWorkflow" | "history">[],
+  signal: AbortSignal,
+) {
+  for (const service of services) {
+    if (signal.aborted) break;
+    const projectScopeId = service.context.projectScopeId;
+    try {
+      await service.memoryWorkflow.workOnce(signal);
+    } catch (error) {
+      if (!signal.aborted)
+        log("error", "memory_worker_failed", { projectScopeId, error: publicError(error) });
+    }
+    try {
+      await service.history.workOnce(signal);
+    } catch (error) {
+      if (
+        !(
+          error instanceof CodeMemoryError &&
+          ["HISTORY_BUSY", "HISTORY_MODEL_BUSY"].includes(error.code)
+        )
+      )
+        log("error", "history_worker_failed", { projectScopeId, error: publicError(error) });
+    }
+  }
+}
 export async function runMcp(session: ProjectSession, store: ProjectStore) {
   return runMcpWorkspace([{ session, store }]);
 }
@@ -308,24 +336,8 @@ export async function runMcpWorkspace(
   const workerTimer = setInterval(() => {
     if (workerBusy) return;
     workerBusy = true;
-    workerPending = (async () => {
-      for (const service of services) {
-        if (workerAbort.signal.aborted) break;
-        await service.memoryWorkflow.workOnce(workerAbort.signal);
-        try {
-          await service.history.workOnce(workerAbort.signal);
-        } catch (error) {
-          if (
-            !(
-              error instanceof CodeMemoryError &&
-              ["HISTORY_BUSY", "HISTORY_MODEL_BUSY"].includes(error.code)
-            )
-          )
-            log("error", "history_worker_failed", { error: publicError(error) });
-        }
-      }
-    })()
-      .catch(() => log("error", "memory_worker_failed"))
+    workerPending = runBackgroundWork(services, workerAbort.signal)
+      .catch((error) => log("error", "memory_worker_failed", { error: publicError(error) }))
       .finally(() => {
         workerBusy = false;
       });
@@ -374,7 +386,17 @@ export async function runMcpWorkspace(
     closing ??= (async () => {
       await pending;
       await workerPending;
-      await Promise.all(entries.map((e) => e.session.close()));
+      // Sessions cancel their index on close; never let a stuck one block shutdown.
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+      const closed = await Promise.race([
+        Promise.all(entries.map((e) => e.session.close())).then(() => true),
+        new Promise<false>((resolve) => {
+          deadline = setTimeout(() => resolve(false), SESSION_CLOSE_DEADLINE_MS);
+          deadline.unref();
+        }),
+      ]);
+      clearTimeout(deadline);
+      if (!closed) log("warn", "session_close_timeout", { timeoutMs: SESSION_CLOSE_DEADLINE_MS });
       await handle.close();
       await Promise.all(entries.map((e) => e.store.close()));
       process.stdin.pause();

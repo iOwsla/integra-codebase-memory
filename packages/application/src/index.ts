@@ -1,5 +1,6 @@
-import { relative } from "node:path";
-import type { ProjectContext, ProjectStore } from "@codememory/core";
+import { lstat } from "node:fs/promises";
+import { relative, resolve } from "node:path";
+import { CodeMemoryError, type ProjectContext, type ProjectStore } from "@codememory/core";
 import { HistoryService, historyReadSchemas } from "@codememory/history";
 import type { ProjectSession } from "@codememory/indexer";
 import {
@@ -8,7 +9,7 @@ import {
   memorySearchSchema,
   workflowReadSchemas,
 } from "@codememory/memory";
-import { runtimeInfo, safePath, slash } from "@codememory/shared";
+import { contains, forbidden, runtimeInfo, safePath, slash } from "@codememory/shared";
 import { z } from "zod";
 
 const paging = {
@@ -68,6 +69,32 @@ export const schemas = {
   ...workflowReadSchemas,
   ...historyReadSchemas,
 };
+/**
+ * Resolve a path tool argument. Outline and context serve the indexed snapshot, so a
+ * file deleted on disk since indexing still resolves through the same lexical checks.
+ */
+async function indexedPath(context: ProjectContext, path: string) {
+  const root = context.canonicalRoot;
+  try {
+    return { path: slash(relative(root, await safePath(context, path))), onDisk: true };
+  } catch (error) {
+    if (!(error instanceof CodeMemoryError && error.code === "NOT_FOUND")) throw error;
+  }
+  const candidate = resolve(root, path);
+  if (!contains(root, candidate) || forbidden(relative(root, candidate)))
+    throw new CodeMemoryError("PATH_OUT_OF_SCOPE", "Path is outside the permitted source scope");
+  for (let dir = resolve(candidate, ".."); contains(root, dir) && dir !== root; ) {
+    if (
+      await lstat(resolve(dir, ".git")).then(
+        () => true,
+        () => false,
+      )
+    )
+      throw new CodeMemoryError("PATH_OUT_OF_SCOPE", "Nested repositories are excluded");
+    dir = resolve(dir, "..");
+  }
+  return { path: slash(relative(root, candidate)), onDisk: false };
+}
 /** Shared application facade. Adapter schemas cannot supply repository IDs. */
 export class CodebaseService {
   readonly history: HistoryService;
@@ -170,13 +197,11 @@ export class CodebaseService {
     // Validate before opening a database transaction; resolve filesystem boundaries outside it.
     const p = schemas[name].parse(input);
     let path: string | undefined;
-    if ("path" in p) {
-      const actual = await safePath(this.context, p.path);
-      path = slash(relative(this.context.canonicalRoot, actual));
-    }
-    const sessionStatus = this.session ? await this.session.status() : undefined;
-    const pendingChanges = sessionStatus?.pendingChanges ?? 0;
-    const updating = sessionStatus?.freshness === "UPDATING";
+    let sourceOnDisk = true;
+    if ("path" in p) ({ path, onDisk: sourceOnDisk } = await indexedPath(this.context, p.path));
+    // In-memory session state only; readIndex metadata already reflects persisted jobs.
+    const live = this.session?.liveState();
+    const updating = !!live && (live.running || live.pendingChanges > 0);
     return this.store.readIndex(this.context, async (reader, metadata) => {
       let data: Record<string, unknown>;
       switch (name) {
@@ -235,12 +260,17 @@ export class CodebaseService {
       }
       return {
         ...metadata,
-        pendingChanges,
+        pendingChanges: live?.pendingChanges ?? 0,
         ...data,
         servedFromVersion: metadata.indexVersion,
         ...(updating
-          ? { incomplete: true, freshness: "UPDATING", staleSince: sessionStatus?.staleSince }
+          ? {
+              incomplete: true,
+              freshness: "UPDATING",
+              staleSince: live?.staleSince ?? metadata.staleSince,
+            }
           : {}),
+        ...(sourceOnDisk ? {} : { sourceOnDisk: false }),
       };
     });
   }

@@ -271,10 +271,12 @@ export interface LanguagePlugin {
   readonly id: string;
   readonly version: string;
   readonly extensions: readonly string[];
+  /** Implementations should stop work and reject with INDEX_CANCELLED once `signal` aborts. */
   analyze(
     context: ProjectContext,
     files: IndexedFile[],
     configs: Map<string, string>,
+    signal?: AbortSignal,
   ): Promise<Analysis>;
 }
 export interface FrameworkPlugin {

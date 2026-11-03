@@ -138,3 +138,74 @@ it("delivers parser progress separately from the resulting graph", async () => {
   );
   expect(await result).toEqual({ symbols: [], edges: [], unresolved: [], diagnostics: [] });
 });
+
+function cancellable(signal: AbortSignal, canonicalRoot?: string) {
+  const child = Object.assign(new EventEmitter(), {
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    kill: vi.fn(),
+  });
+  spawn.mockReturnValue(child);
+  const result = new ProcessTypeScriptPlugin().analyze(
+    { canonicalRoot, effectiveConfig: {} } as ProjectContext,
+    [],
+    new Map(),
+    signal,
+  );
+  return { child, result };
+}
+it("kills the worker and rejects with INDEX_CANCELLED when the job is aborted", async () => {
+  const controller = new AbortController();
+  const { child, result } = cancellable(controller.signal);
+  const assertion = expect(result).rejects.toMatchObject({ code: "INDEX_CANCELLED" });
+  controller.abort();
+  await assertion;
+  expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+});
+it("does not spawn a worker for an already aborted job", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await expect(cancellable(controller.signal).result).rejects.toMatchObject({
+    code: "INDEX_CANCELLED",
+  });
+  expect(spawn).not.toHaveBeenCalled();
+});
+it("stops listening for cancellation once the worker completes", async () => {
+  const controller = new AbortController();
+  const { child, result } = cancellable(controller.signal);
+  child.stdout.emit("data", Buffer.from('{"type":"complete"}\n'));
+  child.emit("close", 0, null);
+  await result;
+  controller.abort();
+  expect(child.kill).not.toHaveBeenCalled();
+});
+it("includes the sanitized stderr tail when the worker crashes", async () => {
+  const { child, result } = cancellable(new AbortController().signal, "/projects/app");
+  const failure = result.catch((error: Error & { code?: string }) => error);
+  child.stderr.emit("data", Buffer.from("x".repeat(20000)));
+  child.stderr.emit(
+    "data",
+    Buffer.from("TypeError: boom\u001b[31m\n    at check (/projects/app/src/a.ts:3:1)\n"),
+  );
+  child.emit("close", 1, null);
+  const error = (await failure) as Error & { code?: string };
+  expect(error.code).toBe("PARSER_ERROR");
+  expect(error.message).toContain("code 1");
+  expect(error.message).toContain("TypeError: boom");
+  expect(error.message).toContain("at check (src/a.ts:3:1)");
+  expect(error.message).not.toContain("/projects/app");
+  expect(error.message).not.toContain("\u001b");
+  expect(error.message.length).toBeLessThan(8 * 1024 + 200);
+});
+it("defaults the output limit to 4096 MiB", async () => {
+  const { child, result } = cancellable(new AbortController().signal);
+  const record = Buffer.from(
+    `{"type":"diagnostics","value":{"file":"large.ts","message":"ok"}}${" ".repeat(1024 * 1024)}\n`,
+  );
+  for (let i = 0; i < 1025; i++) child.stdout.emit("data", record);
+  child.stdout.emit("data", Buffer.from('{"type":"complete"}\n'));
+  child.emit("close", 0, null);
+  expect((await result).diagnostics).toHaveLength(1025);
+  expect(child.kill).not.toHaveBeenCalled();
+});
