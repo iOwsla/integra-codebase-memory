@@ -14,6 +14,7 @@ export async function fixture(files: Record<string, string>) {
   return { root, dispose: () => rm(root, { recursive: true, force: true }) };
 }
 /** Every suite gets a new database; never migrate a supplied database directly. */
+/** `through: 0` leaves the database empty, as before the first migration. */
 export async function testDatabase(options: { through?: number } = {}) {
   const admin = new pg.Pool({
     connectionString: process.env.TEST_DATABASE_URL ?? defaultDatabaseUrl,
@@ -23,7 +24,7 @@ export async function testDatabase(options: { through?: number } = {}) {
   const url = new URL(process.env.TEST_DATABASE_URL ?? defaultDatabaseUrl);
   url.pathname = `/${name}`;
   const store = new PostgresStore(url.href);
-  await store.migrate(options.through);
+  if (options.through !== 0) await store.migrate(options.through);
   return {
     store,
     url: url.href,

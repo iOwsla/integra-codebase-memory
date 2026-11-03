@@ -63,6 +63,10 @@ export async function migrateRuntimeDatabases(
   } finally {
     await store.close();
   }
+  // An empty database has no CodeMemory data the new runtime could misread; the runtime
+  // reports SCHEMA_OUTDATED until it is migrated, so other projects can still update.
+  if (version === 0)
+    return "The external DATABASE_URL has no CodeMemory schema yet; run bun scripts/migrate.ts against it before indexing.";
   if (version < requiredSchemaVersion)
     throw new Error(
       `External database schema is at migration ${version}, this release needs ${requiredSchemaVersion}. Run bun scripts/migrate.ts with that DATABASE_URL (or codememory system setup for the managed service), then retry the update.`,

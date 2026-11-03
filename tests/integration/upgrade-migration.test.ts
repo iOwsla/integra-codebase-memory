@@ -111,6 +111,15 @@ it("activation refuses an external database that is behind and accepts it once m
     await expect(
       migrateRuntimeDatabases(external, { externalUrl: db.url }),
     ).resolves.toBeUndefined();
+    // An empty database holds nothing to protect; activation continues with an instruction.
+    const empty = await testDatabase({ through: 0 });
+    try {
+      await expect(
+        migrateRuntimeDatabases(external, { externalUrl: empty.url }),
+      ).resolves.toContain("bun scripts/migrate.ts");
+    } finally {
+      await empty.dispose();
+    }
     // An unreachable database cannot be checked; activation continues with an instruction.
     const unreachable = new URL(db.url);
     unreachable.port = "1";
