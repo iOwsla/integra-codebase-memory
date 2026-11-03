@@ -74,14 +74,6 @@ export class CompilerWorkspace {
   private readonly parsed = new Map<string, ts.ParsedCommandLine>();
   private readonly referenced = new Set<string>();
   private readonly owner = new Map<string, string>();
-  // Parsed and bound SourceFiles shared between tsconfig groups whose
-  // source-affecting options match, as the language service DocumentRegistry
-  // does. The checker keeps its node and symbol links in private tables, so a
-  // file bound by one program is safe to reuse in a later one. The registry is
-  // used only for its key over parse- and bind-affecting options (jsx,
-  // moduleDetection, target, alwaysStrict...); files are parsed exactly as before.
-  private readonly registry = ts.createDocumentRegistry(ts.sys.useCaseSensitiveFileNames);
-  private readonly sourceFiles = new Map<string, { file: ts.SourceFile; shared: boolean }>();
   constructor(
     private readonly context: ProjectContext,
     files: IndexedFile[],
@@ -361,23 +353,8 @@ export class CompilerWorkspace {
       group.push(path);
       groups.set(config, group);
     }
-    try {
-      yield* this.compile(groups, observe);
-    } finally {
-      // Also covers a caller that stops iterating early.
-      this.sourceFiles.clear();
-    }
-  }
-  private *compile(
-    groups: Map<string, string[]>,
-    observe?: (durationMs: number, files: number) => void,
-  ) {
-    let remaining = groups.size;
     for (const [config, roots] of groups) {
       const options = this.options(config);
-      const settings = this.registry.getKeyForCompilationSettings(options);
-      const rootSet = new Set(roots);
-      const acquired = new Set<string>();
       const host: ts.CompilerHost = {
         getSourceFile: (path, version) => {
           if (isLibFile(resolve(path)))
@@ -387,20 +364,9 @@ export class CompilerWorkspace {
             );
           const actual = this.sourcePath(path),
             content = this.texts.get(actual);
-          if (content === undefined) return undefined;
-          // Files reached through a mount or declaration redirect get a program
-          // specific fileName assigned after this call, so they are never shared.
-          if (actual !== resolve(path)) return ts.createSourceFile(actual, content, version, true);
-          const format = typeof version === "object" ? version.impliedNodeFormat : undefined;
-          const key = `${settings}|${format ?? ""}|${actual}`;
-          let entry = this.sourceFiles.get(key);
-          if (!entry) {
-            entry = { file: ts.createSourceFile(actual, content, version, true), shared: false };
-            this.sourceFiles.set(key, entry);
-          }
-          if (!rootSet.has(actual)) entry.shared = true;
-          acquired.add(key);
-          return entry.file;
+          return content === undefined
+            ? undefined
+            : ts.createSourceFile(actual, content, version, true);
         },
         getDefaultLibFileName: (o) => resolve(libDirectory, ts.getDefaultLibFileName(o)),
         getDefaultLibLocation: () => libDirectory,
@@ -479,12 +445,6 @@ export class CompilerWorkspace {
       // The caller has finished this group before the generator resumes.
       // Release its compiler graph before constructing the next one.
       program = undefined;
-      // Keep only files another group has imported; a file used solely as a
-      // root of this group is dropped so peak memory stays near one program.
-      if (--remaining === 0) this.sourceFiles.clear();
-      else
-        for (const key of acquired)
-          if (!this.sourceFiles.get(key)?.shared) this.sourceFiles.delete(key);
       if (process.versions.bun) Bun.gc(true);
     }
   }
