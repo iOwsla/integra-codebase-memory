@@ -51,6 +51,7 @@
 - WIP capture treats CRLF-only differences as clean and records filtered, ident, re-encoded and Git LFS pointer paths as `UNSUPPORTED_SOURCE` instead of reporting them as unstaged edits.
 - `engineering_context` resolves HEAD once per request instead of once per search. Deleted history sources report `sourceState: NOT_FOUND` instead of `HISTORY_READ_ERROR`.
 - An interpretation job interrupted by shutdown or a lost provider lease returns to the queue without consuming an attempt.
+- Requeue a memory workflow job when the worker stops mid-inference (Ctrl+C or an MCP client disconnect) instead of marking it FAILED with `MEMORY_CANCELLED`; the interrupted run no longer counts toward the three-attempt retry limit.
 
 ## 0.1.0-alpha.34 — 2026-11-03
 

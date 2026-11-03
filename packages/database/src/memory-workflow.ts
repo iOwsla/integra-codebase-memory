@@ -144,6 +144,7 @@ export class MemoryWorkflowRepository {
   }
   async workMemory(
     c: ProjectContext,
+    workerSignal: AbortSignal | undefined,
     run: (
       job: MemoryJob,
       progress: (phase: string, metrics?: Record<string, unknown>) => Promise<void>,
@@ -207,6 +208,23 @@ export class MemoryWorkflowRepository {
           throw new CodeMemoryError("MEMORY_DISABLED", "Project disabled during processing");
         job.state = "SUCCEEDED";
       } catch (error) {
+        if (
+          workerSignal?.aborted &&
+          error instanceof CodeMemoryError &&
+          error.code === "MEMORY_CANCELLED"
+        ) {
+          // Worker shutdown is not a job failure: requeue without spending a retry attempt.
+          job.state = "QUEUED";
+          job.attempts--;
+          delete job.owner;
+          delete job.phase;
+          if (connectionError) throw connectionError;
+          await conn.query(
+            "UPDATE memory_jobs SET state=$3,data=$4 WHERE repository_id=$1 AND id=$2",
+            [c.projectScopeId, job.id, job.state, JSON.stringify(job)],
+          );
+          return false;
+        }
         job.state = "FAILED";
         job.candidates = [];
         job.error = error instanceof CodeMemoryError ? error.code : "MEMORY_PROVIDER_ERROR";

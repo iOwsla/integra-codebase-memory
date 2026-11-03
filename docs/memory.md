@@ -118,7 +118,8 @@ Multiple clients sharing one database use one global PostgreSQL worker lock.
 No long database transaction remains open during inference. Abrupt process death
 releases the connection lock; a subsequent worker recovers its RUNNING job.
 FAILED jobs require explicit retry and have at most three attempts. Ctrl+C stops
-the foreground worker and its owned model process. Status and candidate commands
+the foreground worker and its owned model process; a job interrupted that way, or
+by an MCP client disconnecting, returns to QUEUED without using an attempt. Status and candidate commands
 are read-only; submitting, reviewing and retrying are distinct operations.
 
 Codex extraction requests `gpt-5.3-codex-spark`; verification pins

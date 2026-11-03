@@ -197,7 +197,7 @@ export class MemoryWorkflowService {
     };
   }
   async workOnce(signal?: AbortSignal) {
-    return this.store.workMemory(this.context, async (job, progress, leaseSignal) => {
+    return this.store.workMemory(this.context, signal, async (job, progress, leaseSignal) => {
       const jobSignal = signal ? AbortSignal.any([signal, leaseSignal]) : leaseSignal;
       if (jobSignal.aborted) throw new CodeMemoryError("MEMORY_CANCELLED", "Worker stopped");
       const metrics: Record<string, unknown> = { protocolVersion: MEMORY_PROTOCOL_VERSION };
