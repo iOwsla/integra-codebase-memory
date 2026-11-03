@@ -254,7 +254,12 @@ export class HistoryService {
       excerpt: s.text,
       contentHash: hash(s.text),
     }));
-    const used = this.batchExcerptBytes ?? Number((await db.stats()).excerptBytes);
+    let used = this.batchExcerptBytes ?? Number((await db.stats()).excerptBytes);
+    if (used + bytes.length > settings.maxStorageBytes && this.batchExcerptBytes !== undefined) {
+      // The cached running total may be stale (cleanup or restore since the job started).
+      used = Number((await db.stats()).excerptBytes);
+      this.batchExcerptBytes = used;
+    }
     if (used + bytes.length > settings.maxStorageBytes)
       throw new CodeMemoryError(
         "HISTORY_QUOTA",
@@ -315,16 +320,15 @@ export class HistoryService {
       if (!job) {
         const cursor = await db.cursor(worktreeId, "GIT_HISTORY");
         const excludeGenerated = this.context.effectiveConfig.excludeGenerated;
-        const skipGit =
-          cursor?.head === git.head &&
+        // Shared by both gates; old cursors without excludeGenerated keep the current value.
+        const cursorReusable =
           cursor?.complete === true &&
-          cursor?.policyGeneration === settings.policyGeneration &&
-          cursor?.shallow === git.shallow;
+          cursor.policyGeneration === settings.policyGeneration &&
+          cursor.shallow === git.shallow &&
+          (cursor.excludeGenerated ?? excludeGenerated) === excludeGenerated;
+        const skipGit = cursorReusable && cursor?.head === git.head;
         let excludeHead =
-          cursor?.complete &&
-          cursor?.policyGeneration === settings.policyGeneration &&
-          cursor?.shallow === git.shallow &&
-          (cursor?.excludeGenerated ?? excludeGenerated) === excludeGenerated &&
+          cursorReusable &&
           // Cursors written before blockingGapCount existed fall back to every gap.
           !(cursor?.blockingGapCount ?? cursor?.gapCount)
             ? cursor.head
@@ -739,6 +743,15 @@ export class HistoryService {
           }),
       );
     const staged = parse(index);
+    // Discovery and object maps are bounded by the Git adapter output cap. No worktree Git diff/filter execution.
+    const discoverPaths = async (head: Map<string, string[]>) => {
+      const files = new Set<string>();
+      await new RepositoryScanner().discover(this.context, async (path) => {
+        files.add(path);
+      });
+      const paths = [...new Set([...files, ...staged.keys(), ...head.keys()])].sort();
+      return { files, paths, pathsHash: hash(JSON.stringify(paths)) };
+    };
     // The unchanged index hash keeps staged paths stable, so the path snapshot is reused per job.
     let snapshot =
       this.wipSnapshot?.key === cacheKey && this.wipSnapshot.pathsHash === job.data.wipPathsHash
@@ -748,13 +761,8 @@ export class HistoryService {
       const head = current.head
         ? parse(await this.git.tree(root, current.head))
         : new Map<string, string[]>();
-      // Discovery and object maps are bounded by the Git adapter output cap. No worktree Git diff/filter execution.
-      const files = new Set<string>();
-      await new RepositoryScanner().discover(this.context, async (path) => {
-        files.add(path);
-      });
-      const paths = [...new Set([...files, ...staged.keys(), ...head.keys()])].sort();
-      snapshot = { key: cacheKey, paths, files, head, pathsHash: hash(JSON.stringify(paths)) };
+      const { files, paths, pathsHash } = await discoverPaths(head);
+      snapshot = { key: cacheKey, paths, files, head, pathsHash };
       if (job.data.wipPathsHash && job.data.wipPathsHash !== snapshot.pathsHash) {
         this.gap(job, "WIP_SCOPE_CHANGED");
         job.data.stage = "COMPLETE";
@@ -817,7 +825,17 @@ export class HistoryService {
             : undefined;
         if (stageObject !== headObject) await write("STAGED", stageBytes, stageObject, headObject);
         if (files.has(path)) {
-          const bytes = await readSource(this.context, path, settings.maxFileBytes);
+          let bytes: Buffer;
+          try {
+            bytes = await readSource(this.context, path, settings.maxFileBytes);
+          } catch (e) {
+            // The per-job snapshot can outlive a file: a deleted tracked file is a deletion.
+            if (code(e) !== "NOT_FOUND") throw e;
+            if (stageObject) await write("UNSTAGED", undefined, undefined, stageObject);
+            processed++;
+            job.data.wipOffset = offset;
+            continue;
+          }
           const blobId = (value: Buffer) =>
             createHash(current.objectFormat ?? "sha1")
               .update(`blob ${value.length}\0`)
@@ -851,10 +869,15 @@ export class HistoryService {
     job.data.wipOffset = offset;
     if (offset >= paths.length) {
       const after = await this.git.inspect(root);
-      const consistent =
+      let consistent =
         after.head === current.head && hash(await this.git.index(root)) === indexHash;
       if (!consistent) this.gap(job, "INCONSISTENT_SNAPSHOT");
-      else await db.reconcileWip(String(job.data.worktreeId), String(job.data.scan));
+      // The path snapshot is cached per job, so re-validate the worktree scope once per sweep.
+      else if ((await discoverPaths(head)).pathsHash !== snapshot.pathsHash) {
+        this.gap(job, "WIP_SCOPE_CHANGED");
+        consistent = false;
+      }
+      if (consistent) await db.reconcileWip(String(job.data.worktreeId), String(job.data.scan));
       await db.cursor(String(job.data.worktreeId), "WIP", {
         head: current.head,
         indexHash,
@@ -1223,11 +1246,14 @@ export class HistoryService {
       this.nextAutomaticAt = Date.now() + 30000;
       const { worktreeId } = await this.identity();
       const last = await this.db.latestJob("COLLECT", worktreeId);
-      // A quota failure repeats until configure or a purge changes the state; do not add a job per tick.
+      // A quota failure repeats until configure, a purge or freed space changes the state;
+      // do not add a job per tick. Stats are read only while paused, once per tick.
       if (
         last?.state === "FAILED" &&
         last.data.error === "HISTORY_QUOTA" &&
-        last.data.policyGeneration === settings.policyGeneration
+        last.data.policyGeneration === settings.policyGeneration &&
+        Number((await this.db.stats()).excerptBytes) >=
+          Number(last.data.excerptBytesUsed ?? settings.maxStorageBytes)
       )
         return false;
       await this.collect({}, signal);

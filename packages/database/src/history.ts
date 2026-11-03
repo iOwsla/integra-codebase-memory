@@ -331,40 +331,60 @@ LIMIT $3)`,
     if (this.connection) return action(this, this.leaseSignal);
     const c = await this.pool.connect();
     const lease = new AbortController();
-    let acquired = false;
+    // alpha.34 compatibility: older runtimes take the global history-worker key
+    // exclusively. Holding it in shared mode keeps old and new workers mutually
+    // exclusive while new workers on different scopes still run concurrently.
+    // Remove once alpha.34 or older runtimes can no longer share the database.
+    let legacyAcquired = false;
+    let scopedAcquired = false;
     let failed: Error | undefined;
     const onError = (e: Error) => {
       failed = e;
       lease.abort();
     };
     c.on("error", onError);
+    const busy = () =>
+      new CodeMemoryError(
+        "HISTORY_BUSY",
+        "Another history batch owns the worker; retry after it yields",
+      );
     try {
-      acquired =
+      legacyAcquired =
+        (
+          await c.query(
+            "SELECT pg_try_advisory_lock_shared(hashtextextended('codememory:history-worker',0)) AS ok",
+          )
+        ).rows[0]?.ok === true;
+      if (!legacyAcquired) throw busy();
+      scopedAcquired =
         (
           await c.query(
             "SELECT pg_try_advisory_lock(hashtextextended('codememory:history-worker:'||$1,0)) AS ok",
             [this.scope],
           )
         ).rows[0]?.ok === true;
-      if (!acquired)
-        throw new CodeMemoryError(
-          "HISTORY_BUSY",
-          "Another history batch owns the worker; retry after it yields",
-        );
+      if (!scopedAcquired) throw busy();
       return await action(
         new PostgresHistory(this.pool, this.scope, c, lease.signal),
         lease.signal,
       );
     } finally {
       try {
-        if (acquired && !failed)
+        if (scopedAcquired && !failed)
           await c.query(
             "SELECT pg_advisory_unlock(hashtextextended('codememory:history-worker:'||$1,0))",
             [this.scope],
           );
       } finally {
-        c.removeListener("error", onError);
-        c.release(failed);
+        try {
+          if (legacyAcquired && !failed)
+            await c.query(
+              "SELECT pg_advisory_unlock_shared(hashtextextended('codememory:history-worker',0))",
+            );
+        } finally {
+          c.removeListener("error", onError);
+          c.release(failed);
+        }
       }
     }
   }
@@ -569,6 +589,11 @@ LIMIT $3)`,
       await this.q(
         `UPDATE history_segments s SET excerpt=NULL WHERE s.repository_id=$1 AND EXISTS(SELECT 1 FROM history_revisions r WHERE (r.repository_id,r.id)=(s.repository_id,s.revision_id) AND ${filter})`,
         args,
+      );
+    // In-flight collections carry a cached excerpt total; drop it so the next batch re-reads stats.
+    if (apply && !purge)
+      await this.q(
+        "UPDATE history_jobs SET data=data-'excerptBytesUsed' WHERE repository_id=$1 AND kind='COLLECT' AND state IN ('QUEUED','RUNNING')",
       );
     // Source-derived jobs contain exact excerpts too. Purging removes their payload but preserves audit IDs.
     if (apply && purge)
