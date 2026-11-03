@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Load TypeScript standard-library declarations from CodeMemory's own TypeScript package during analysis. Member calls through `Record`, `Promise` and other built-in generics now resolve instead of being recorded as unresolved; library declarations are never indexed. The analyzer version changes, so existing indexes re-analyze once.
+- Report interface and base-class dispatch in `find_callers`: calls through a supertype member the method implements or overrides are listed with `dispatch.via`.
+- Add `scripts/evaluate-project.ts`, a read-only quality and latency evaluation that compares relationship results with the TypeScript language service and can index an unreleased build into a disposable database.
+
 ## 0.1.0-alpha.33 — 2026-09-27
 
 - Prefer the local OrbStack engine on macOS while retaining Docker Desktop support. Bind managed PostgreSQL state to its engine, provide an explicit fresh-engine path, and cap the managed container at one CPU and 1 GiB.

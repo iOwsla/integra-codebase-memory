@@ -82,7 +82,7 @@ const toolDescriptions: Record<keyof typeof schemas, string> = {
   find_references:
     "Find incoming static symbol references, including Prisma MODEL/FIELD consumers. Prisma usages include operation metadata and call lines; select the model ID from search_symbols. Missing references do not prove unused code.",
   find_callers:
-    "Find direct static callers before changing a function. Missing callers do not prove dead code; inspect entry points and unresolved uses.",
+    "Find static callers before changing a function. Rows with dispatch.via call the interface or base-class member this method implements or overrides; the runtime target may be another implementation. Missing callers do not prove dead code; inspect entry points and unresolved uses.",
   find_callees:
     "Find functions directly called by a symbol to understand its behavior and downstream impact.",
   trace_dependencies:

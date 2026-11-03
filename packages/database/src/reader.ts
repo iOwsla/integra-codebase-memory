@@ -150,6 +150,7 @@ export class PostgresIndexReader implements IndexReader {
   ) {
     this.checkPage(page);
     const symbol = await this.resolve(selector);
+    if (direction === "incoming" && type === "CALLS") return this.callers(symbol, page);
     const anchor = direction === "incoming" ? "target_id" : "source_id";
     const neighbor = direction === "incoming" ? "source_id" : "target_id";
     const rows = await this.query<{ data: Record<string, unknown>; symbol: CodeSymbol }>(
@@ -162,6 +163,56 @@ export class PostgresIndexReader implements IndexReader {
     );
     return pageResult(
       rows.map(({ data, symbol }) => ({ ...data, symbol })),
+      page,
+    );
+  }
+  /** Direct callers plus calls made through an interface or base-class member the
+   * symbol implements or overrides. Those rows carry `dispatch.via`: the receiver's
+   * static type names the supertype member, so the runtime target may be another
+   * implementation. Member matching follows TypeScript structural rules: same name
+   * and static-ness on a declared IMPLEMENTS/EXTENDS ancestor. */
+  private async callers(symbol: CodeSymbol, page: PageRequest) {
+    const rows = await this.query<{
+      data: Record<string, unknown>;
+      symbol: CodeSymbol;
+      via: Record<string, unknown> | null;
+    }>(
+      `
+      WITH RECURSIVE anchor AS (
+        SELECT id, name, coalesce(data->>'static','false') AS static
+        FROM symbols WHERE repository_id=$1 AND id=$2
+      ), supers(id, depth) AS (
+        SELECT h.target_id, 1 FROM symbol_edges d
+        JOIN symbol_edges h ON h.repository_id=d.repository_id AND h.source_id=d.source_id
+          AND h.edge_type IN ('IMPLEMENTS','EXTENDS')
+        WHERE d.repository_id=$1 AND d.target_id=$2 AND d.edge_type='DECLARES'
+        UNION
+        SELECT h.target_id, s.depth+1 FROM supers s
+        JOIN symbol_edges h ON h.repository_id=$1 AND h.source_id=s.id
+          AND h.edge_type IN ('IMPLEMENTS','EXTENDS')
+        WHERE s.depth < 10
+      ), targets AS (
+        SELECT $2::text AS id, NULL::jsonb AS via
+        UNION
+        SELECT m.id, jsonb_build_object('id',m.id,'qualifiedName',m.qualified_name,
+          'kind',m.data->>'kind','file',m.data->>'file','startLine',m.data->'startLine')
+        FROM (SELECT DISTINCT id FROM supers) s
+        JOIN symbol_edges d ON d.repository_id=$1 AND d.source_id=s.id AND d.edge_type='DECLARES'
+        JOIN symbols m ON m.repository_id=$1 AND m.id=d.target_id
+        JOIN anchor a ON m.name=a.name AND coalesce(m.data->>'static','false')=a.static AND m.id<>a.id
+      )
+      SELECT e.data, s.data AS symbol, t.via FROM targets t
+      JOIN symbol_edges e ON e.repository_id=$1 AND e.target_id=t.id AND e.edge_type='CALLS'
+      JOIN symbols s ON s.repository_id=e.repository_id AND s.id=e.source_id
+      ORDER BY s.data->>'file' COLLATE "C", (e.data->>'line')::int, e.id COLLATE "C" LIMIT $3 OFFSET $4`,
+      [symbol.id, page.limit + 1, page.offset],
+    );
+    return pageResult(
+      rows.map(({ data, symbol, via }) => ({
+        ...data,
+        symbol,
+        ...(via ? { dispatch: { via } } : {}),
+      })),
       page,
     );
   }
