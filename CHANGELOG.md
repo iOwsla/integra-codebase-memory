@@ -4,6 +4,12 @@
 
 - Record the receiver's static class/interface on call edges (`receiverType`) and keep a `find_callers` dispatch row only when that type is an ancestor of the queried member. Calls on a sibling subclass that inherits the base member are no longer reported as possible callers of an override. The analyzer version changes, so existing indexes re-analyze once.
 - evaluate-project: exclude `this` keyword matches and inherited-member calls on sibling receivers from the language-service oracle.
+- Detect Prisma queries through classes that extend a generated client, such as the NestJS `class PrismaService extends PrismaClient`, so `find_references` on a model or field lists those calls.
+- Fix publication failing with a duplicate key when a composite `@relation` is missing more than one field; each missing pair is now its own unresolved record.
+- Keep `find_callers` dispatch rows when calls with different receivers to the same member share a line; merged call edges keep only receiver metadata that every call agrees on.
+- Resolve namespace-import references (`import * as utils`) to the imported file's FILE symbol instead of its first declaration.
+- Report a TypeScript checker failure on one file as an `ANALYSIS_ERROR` diagnostic and continue with the other files instead of aborting the project analysis.
+- The analyzer version changes again, so existing indexes re-analyze once.
 
 ## 0.1.0-alpha.34 — 2026-11-03
 

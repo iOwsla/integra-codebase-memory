@@ -71,6 +71,9 @@ queryable. Do not trust all relationships from a file listed in syntax diagnosti
 inspect or fix its source first. Syntax diagnostics have `kind: SYNTAX_ERROR`,
 a TypeScript `code`, and one-based `line`/`column`. Configuration diagnostics
 use `CONFIGURATION`; unavailable locations are omitted rather than guessed.
+If the TypeScript checker fails on one file, that file's semantic relationships
+are dropped and an `ANALYSIS_ERROR` diagnostic names it while the rest of the
+project is analyzed; more than 20 such failures fail the whole run.
 
 `diagnosticSummary` gives total messages, affected files, page limit/offset,
 `hasMore` and `nextOffset`. `last_run.diagnostics` contains only that page

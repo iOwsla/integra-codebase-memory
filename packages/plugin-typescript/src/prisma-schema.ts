@@ -238,11 +238,15 @@ export class PrismaCatalog {
               const from = this.fields.get(model.id)?.get(String(name)),
                 to = this.fields.get(target.id)?.get(String(remote[index]));
               if (from && to) this.edge(from, to, "FOREIGN_KEY", field.startLine);
+              // One record per missing pair: a composite relation can lack several.
               else
                 this.unresolved(
                   field,
                   "PRISMA_RELATION",
-                  "Relation scalar field or referenced field is missing",
+                  `Relation scalar field or referenced field is missing (${String(name)} -> ${String(remote[index])})`,
+                  String(index),
+                  String(name),
+                  String(remote[index]),
                 );
             });
         }
@@ -319,9 +323,9 @@ export class PrismaCatalog {
       ...(metadata ? { metadata } : {}),
     });
   }
-  unresolved(source: CodeSymbol, type: string, reason: string) {
+  unresolved(source: CodeSymbol, type: string, reason: string, ...discriminators: string[]) {
     this.analysis.unresolved.push({
-      id: id(source.id, type, reason),
+      id: id(source.id, type, reason, ...discriminators),
       source: source.id,
       fileId: source.fileId,
       line: source.startLine,
