@@ -49,8 +49,10 @@ absolute, `./` and the exact supplied legacy spelling are accepted when
 filtering. Other historical spellings may require supplying their stored value.
 No migration rewrites memory content or scope identities.
 
-`clean --yes` deletes only code index data; memory survives. `remove --yes`
-removes the selected project and its memories. These operations remain scoped.
+`clean --yes` deletes only code index data, including run history and the
+latest index job; memory survives. The next index continues numbering above the
+last `indexVersion` instead of restarting at 1. `remove --yes` removes the
+selected project and its memories. These operations remain scoped.
 
 ## CLI examples
 

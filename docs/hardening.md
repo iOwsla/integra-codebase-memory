@@ -24,8 +24,9 @@ include a bounded error code; detailed source contents and exception text are
 not copied into these records. `fileErrors` includes at most 20 affected paths.
 
 A RUNNING record whose owning backend no longer holds the exact project
-advisory lock is reported with `interrupted: true`. Run `index --project ...`
-to reconcile it; no delete, forced unlock or automatic destructive repair is
+advisory lock is reported with `interrupted: true`. The store then reports the
+last completed generation (`freshness: LAST_COMPLETED`) instead of UPDATING, in
+both `status` and query metadata. Run `index --project ...` to reconcile it; no delete, forced unlock or automatic destructive repair is
 necessary. A surviving process holds its lock until publication/cleanup ends.
 Connection loss releases the pool slot and permits a later retry. A process
 killed with SIGKILL cannot finalize its status, which is why lock ownership is
@@ -35,6 +36,8 @@ Progress is operational metadata, separate from atomic graph publication. A
 crash between publication and the COMPLETE update can leave a completed graph
 and an interrupted attempt together. The next no-op reconciliation resolves the
 marker. This is a latest-attempt record, not an unbounded job history or a daemon.
+Each publication keeps the latest 20 `index_runs` rows per project, and recording
+a failure deletes that project's `index_errors` older than 30 days.
 
 ## Cost of unchanged indexing
 

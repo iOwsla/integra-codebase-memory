@@ -125,4 +125,16 @@ FOREIGN KEY(repository_id,worktree_id) REFERENCES history_worktrees(repository_i
 DROP INDEX IF EXISTS edges_out;`,
   `CREATE INDEX edges_file ON symbol_edges(repository_id,file_id);
 CREATE INDEX unresolved_file ON unresolved_references(repository_id,(data->>'fileId'));`,
+  // No query reads bare-name trigrams or filters edges by type without an anchor id; both
+  // indexes only cost publish writes. Stored metadata columns let scans and publishes compare
+  // hashes without detoasting each file's content. version_floor keeps index versions
+  // monotonic across `clean`, which resets version to 0 (not indexed).
+  `DROP INDEX IF EXISTS symbols_fuzzy;
+DROP INDEX IF EXISTS edges_type;
+ALTER TABLE files
+  ADD COLUMN hash text GENERATED ALWAYS AS (data->>'hash') STORED,
+  ADD COLUMN file_status text GENERATED ALWAYS AS (data->>'status') STORED,
+  ADD COLUMN analysis_hash text GENERATED ALWAYS AS (data->>'analysisHash') STORED;
+CREATE INDEX files_path_c ON files(repository_id,(path COLLATE "C")) WHERE data->>'status'='INDEXED';
+ALTER TABLE repositories ADD COLUMN version_floor integer NOT NULL DEFAULT 0;`,
 ];

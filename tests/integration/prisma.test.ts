@@ -108,6 +108,13 @@ it("uses physical PostgreSQL relationship indexes for selective model-usage look
     expect(indexes).toContain("edges_file");
     expect(indexes).not.toContain("edges_in");
     expect(indexes).not.toContain("edges_out");
+    // Migration 10 drops indexes no query uses; selective lookups keep their paginated index.
+    expect(indexes).not.toContain("edges_type");
+    const symbolIndexes = (
+      await db.store.pool.query("SELECT indexname FROM pg_indexes WHERE tablename='symbols'")
+    ).rows.map((r) => r.indexname);
+    expect(symbolIndexes).not.toContain("symbols_fuzzy");
+    expect(symbolIndexes).toContain("symbols_name_lower");
   } finally {
     await db.dispose();
     await f.dispose();
