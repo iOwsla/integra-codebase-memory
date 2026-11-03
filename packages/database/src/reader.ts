@@ -68,7 +68,7 @@ export class PostgresIndexReader implements IndexReader {
     const rows = await this.query<{ data: CodeSymbol; score: number; reason: string }>(
       `
       WITH candidates AS (
-        SELECT s.*, f.data->>'generated'='true' AS generated,
+        SELECT s.*, COALESCE(f.generated, (f.data->>'generated')='true') AS generated,
           CASE WHEN lower(s.name)=$2 THEN 100 WHEN lower(s.qualified_name)=$2 THEN 95
                WHEN lower(s.name) LIKE $3 THEN 80 WHEN lower(s.name) LIKE $4 THEN 65
                ELSE 50*similarity(lower(s.name),$2) END AS base_score,
@@ -278,7 +278,7 @@ export class PostgresIndexReader implements IndexReader {
       WHERE s.repository_id=$1 AND s.data->>'kind'='FUNCTION'
         AND s.data->>'exported'='false' AND s.name NOT LIKE '<%'
         AND s.data->'metadata'->>'bodyHash' IS NOT NULL
-        AND f.data->>'status'='INDEXED' AND f.data->>'generated'='false'
+        AND COALESCE(f.file_status, f.data->>'status')='INDEXED' AND COALESCE(f.generated, (f.data->>'generated')='true')=false
         AND NOT EXISTS (SELECT 1 FROM symbol_edges e WHERE e.repository_id=s.repository_id
           AND e.target_id=s.id AND e.source_id<>s.id AND e.edge_type<>'DECLARES')
       ORDER BY s.data->>'file' COLLATE "C", (s.data->>'startLine')::int, s.id COLLATE "C"
@@ -319,7 +319,7 @@ export class PostgresIndexReader implements IndexReader {
         FROM symbols s JOIN files f ON f.repository_id=s.repository_id AND f.id=s.file_id
         WHERE s.repository_id=$1 AND s.data->'metadata'->>'bodyHash' IS NOT NULL
           AND (s.data->'metadata'->>'bodyLength')::int >= $2
-          AND f.data->>'status'='INDEXED' AND f.data->>'generated'='false'
+          AND COALESCE(f.file_status, f.data->>'status')='INDEXED' AND COALESCE(f.generated, (f.data->>'generated')='true')=false
       ) SELECT jsonb_build_object('id',id,'name',name,'file',data->>'file',
           'startLine',data->'startLine','endLine',data->'endLine','kind',data->>'kind',
           'bodyStartLine',data->'metadata'->'bodyStartLine','bodyEndLine',data->'metadata'->'bodyEndLine') AS symbol,

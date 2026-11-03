@@ -170,4 +170,20 @@ CREATE TRIGGER files_metadata_from_data BEFORE INSERT OR UPDATE OF data ON files
   // planner skipped files_incomplete and detoasted every file's content (55 ms per call on
   // a 5,660-file project). The real column has statistics, so this partial index is used.
   `CREATE INDEX files_not_indexed ON files(repository_id) WHERE file_status<>'INDEXED';`,
+  // search_symbols and the quality reports read the generated flag for every candidate symbol;
+  // from data that decompresses the file's whole source once per symbol. The column keeps the
+  // jsonb comparison's semantics (NULL when the key is absent). Updating only this column does
+  // not fire the data trigger and reuses the TOAST pointers, so the backfill is cheap.
+  // files_incomplete has no reader since migration 13.
+  `ALTER TABLE files ADD COLUMN generated boolean;
+UPDATE files SET generated=(data->>'generated')='true';
+CREATE OR REPLACE FUNCTION files_metadata_from_data() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.hash := NEW.data->>'hash';
+  NEW.file_status := NEW.data->>'status';
+  NEW.analysis_hash := NEW.data->>'analysisHash';
+  NEW.generated := (NEW.data->>'generated')='true';
+  RETURN NEW;
+END $$;
+DROP INDEX IF EXISTS files_incomplete;`,
 ];

@@ -233,7 +233,7 @@ it("upgrades migration 1 without rewriting indexed data and applies migration 2 
   try {
     const before = await t.db.store.pool.query("SELECT id,xmin::text FROM symbols ORDER BY id");
     await t.db.store.pool.query(
-      "DROP INDEX symbols_name_lower,symbols_qualified_lower,files_content_lower,files_incomplete,index_runs_project_latest,edges_in_page,edges_out_page; DELETE FROM schema_migrations WHERE version=2",
+      "DROP INDEX IF EXISTS symbols_name_lower,symbols_qualified_lower,files_content_lower,files_incomplete,index_runs_project_latest,edges_in_page,edges_out_page; DELETE FROM schema_migrations WHERE version=2",
     );
     await t.db.store.migrate();
     await t.db.store.migrate();

@@ -208,6 +208,28 @@ it("publishes an analysis with duplicate unresolved-reference ids", async () => 
   }
 });
 
+it("keeps the files generated column in step with data", async () => {
+  const t = await indexed({ "a.ts": "export function alpha(){return 1}\n" });
+  try {
+    const rows = await t.db.store.pool.query(
+      "SELECT generated, data->>'generated' AS raw FROM files WHERE repository_id=$1 AND path='a.ts'",
+      [t.c.projectScopeId],
+    );
+    expect(rows.rows).toEqual([{ generated: false, raw: "false" }]);
+    await t.db.store.pool.query(
+      "UPDATE files SET data=jsonb_set(data,'{generated}','true') WHERE repository_id=$1 AND path='a.ts'",
+      [t.c.projectScopeId],
+    );
+    const updated = await t.db.store.pool.query(
+      "SELECT generated FROM files WHERE repository_id=$1 AND path='a.ts'",
+      [t.c.projectScopeId],
+    );
+    expect(updated.rows).toEqual([{ generated: true }]);
+  } finally {
+    await t.dispose();
+  }
+});
+
 it("stores edges without foreign keys or a primary key", async () => {
   const t = await indexed({ "a.ts": "export function alpha(){return 1}\n" });
   try {

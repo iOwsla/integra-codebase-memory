@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Migration 14 stores each file's generated flag in a `generated` column. `search_symbols` and the dead-code and duplicate reports no longer decompress a file's whole source for every candidate symbol: on kiosk-software-last `search_symbols get` (7,018 candidates) fell from 151 ms to 23 ms.
 - Migration 13 indexes non-INDEXED files by the `file_status` column. The incomplete-coverage check that runs before every query no longer detoasts every file's content: per-call overhead on a 5,660-file project fell from about 59 ms to 1 ms.
 - Indexing an unmigrated database now fails with `SCHEMA_OUTDATED` ("Run codememory system setup to migrate") instead of a raw "column does not exist" error. That error and database connection failures retry once per `reconcileMs` instead of backing off exponentially, so open sessions recover soon after setup.
 - Migration 12 adds a trigger that derives the `files` metadata columns from the stored JSON on every write, so an older release (or manual SQL) that writes only the JSON can no longer leave stale hashes that hide changes or keep an outdated graph. Rows that already drifted are queued for the backfill once, and publication also rewrites a row whose columns disagree with its JSON.

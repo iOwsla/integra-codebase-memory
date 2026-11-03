@@ -32,9 +32,9 @@ export { updateLock };
  * published: the new runtime's indexing queries columns that recent migrations add. The managed
  * database is migrated in place (never via setupServices, which recreates the container and
  * cannot be rolled back). An external database is only checked, because activation must not
- * migrate a database it does not own. Migrations 10-13 are forward-compatible with alpha.34
+ * migrate a database it does not own. Migrations 10-14 are forward-compatible with alpha.34
  * (added nullable columns, dropped edge constraints that alpha.34 never relies on, a trigger
- * that fills the new columns, a partial index), so an activation that fails afterwards and keeps the old
+ * that fills the new columns, a partial index, a generated-flag column), so an activation that fails afterwards and keeps the old
  * runtime active on the new schema is safe.
  */
 export async function migrateRuntimeDatabases(
