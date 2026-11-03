@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- History collection keeps incremental Git collection after binary, oversized, generated, undecodable, symlink or submodule gaps; only other Git-stage gaps (`blockingGapCount`) force a full re-walk. Cursors written before this release fall back to `gapCount`.
+- History collection lists commits in pages of 1,000, runs `git show` and `diff-tree` once per commit and parent, reads each blob with one Git process, discovers the worktree once per job for DOCUMENTS and WIP, saves job progress once per batch, and reads the excerpt quota baseline once per job.
+- The history worker lock is per project, so a batch in one project no longer makes other projects fail with `HISTORY_BUSY`.
+- Automatic history mode no longer adds a FAILED job every 30 seconds after `HISTORY_QUOTA`. Terminal collection jobs older than seven days are pruned, keeping the latest per worktree.
+- WIP capture treats CRLF-only differences as clean and records filtered, ident, re-encoded and Git LFS pointer paths as `UNSUPPORTED_SOURCE` instead of reporting them as unstaged edits.
+- `engineering_context` resolves HEAD once per request instead of once per search. Deleted history sources report `sourceState: NOT_FOUND` instead of `HISTORY_READ_ERROR`.
+- An interpretation job interrupted by shutdown or a lost provider lease returns to the queue without consuming an attempt.
+
 ## 0.1.0-alpha.34 — 2026-11-03
 
 - Load TypeScript standard-library declarations (`lib.d.ts` and `lib.*.d.ts`) from CodeMemory's own TypeScript package during analysis. Member calls through `Record`, `Promise` and other built-in generics now resolve instead of being recorded as unresolved; library declarations are never indexed. The analyzer version changes, so existing indexes re-analyze once.

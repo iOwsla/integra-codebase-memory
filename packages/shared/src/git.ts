@@ -176,11 +176,27 @@ export class GitCli implements GitProvider {
     return results;
   }
   async blob(root: string, object: string, maxBytes = 2 * 1024 * 1024) {
-    const value = this.object(object);
-    const size = Number(await this.text(root, ["cat-file", "-s", value]));
-    if (!Number.isSafeInteger(size) || size > maxBytes)
-      throw new CodeMemoryError("SKIPPED_TOO_LARGE", "Git blob exceeds source budget");
-    return this.command(root, ["cat-file", "blob", value], maxBytes + 1);
+    // One process per blob: the output cap enforces the byte budget.
+    try {
+      return await this.command(root, ["cat-file", "blob", this.object(object)], maxBytes);
+    } catch (e) {
+      if (e instanceof CodeMemoryError && e.code === "GIT_OUTPUT_LIMIT")
+        throw new CodeMemoryError("SKIPPED_TOO_LARGE", "Git blob exceeds source budget");
+      throw e;
+    }
+  }
+  /** Reads attributes only; check-attr runs no filter or textconv helper. */
+  async attributes(root: string, path: string, names: string[]) {
+    const tokens = new TextDecoder("utf-8", { fatal: true })
+      .decode(await this.command(root, ["check-attr", "-z", ...names, "--", path]))
+      .split("\0");
+    const result = new Map<string, string>();
+    for (let i = 0; i + 2 < tokens.length; i += 3) {
+      const name = tokens[i + 1],
+        value = tokens[i + 2];
+      if (name !== undefined && value !== undefined) result.set(name, value);
+    }
+    return result;
   }
   async index(root: string) {
     return this.command(root, ["ls-files", "--stage", "-z"]);

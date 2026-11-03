@@ -28,7 +28,9 @@ in the existing PostgreSQL service and survive installer upgrades.
     codememory history configure --automatic --yes
 
 WIP includes saved staged, unstaged and eligible untracked files. Automatic mode
-collects while an MCP connection is open. There is no additional database,
+collects while an MCP connection is open. After a collection fails with
+HISTORY_QUOTA, automatic mode starts no further job until configuration changes or
+a purge resets the job history. There is no additional database,
 container or recursive watcher per client. Collection never stages files, executes
 repository programs, fetches history or reads unsaved editor buffers.
 
@@ -49,13 +51,21 @@ A scan processes one bounded batch unless --all is supplied. Progress goes to
 stderr and JSON to stdout. Ctrl-C preserves the durable cursor. Jobs capture HEAD,
 worktree identity and policy generation; merge parent comparisons remain distinct.
 Previously covered reachable history can be reused on incremental collection.
+Binary, oversized, generated, undecodable, symlink and submodule sources are
+recorded as gaps but do not block it; other Git-stage gaps (blockingGapCount)
+force the next collection to walk the full history again. Terminal collection jobs
+older than seven days are deleted, keeping the latest per worktree; interpretation
+jobs are kept.
 
 Read gapCount, gaps, exclusions and per-source status. A completed local traversal
 does not mean unavailable shallow ancestors or excluded files were analyzed.
 Working-tree capture is non-atomic: HEAD/index/path changes produce explicit gaps
 and each file read is validated. Resolved WIP is not proof that a particular commit
-implemented a rule. Git clean filters are never executed, so raw-byte differences
-may include CRLF/filter normalization without implying a semantic change.
+implemented a rule. Git clean filters are never executed. A worktree file whose only
+difference from the index blob is CRLF line endings counts as clean. Paths with a
+filter, ident or working-tree-encoding attribute, or whose index blob is a Git LFS
+pointer, are recorded as UNSUPPORTED_SOURCE instead of being compared. A path
+deleted since capture reports sourceState NOT_FOUND.
 
 ## Query evidence
 
@@ -109,8 +119,8 @@ explicit retries are capped at three attempts, without silent model fallback.
 ## Resource controls and recovery
 
 Defaults: 20 files/batch, 2 MiB/source, 256 MiB stored excerpts, 30-day WIP retention,
-16,000-byte submitted evidence and one history batch across clients sharing the
-database. Git metadata has an 8 MiB output cap and 15-second deadline. Limits are
+16,000-byte submitted evidence and one history batch per project across clients
+sharing the database. Git metadata has an 8 MiB output cap and 15-second deadline. Limits are
 not performance promises. Model calls do not hold database transactions.
 
     codememory history configure --max-file-bytes 1048576 --retention-days 14 --yes
