@@ -80,19 +80,8 @@ export class CompilerWorkspace {
   // file bound by one program is safe to reuse in a later one. The registry is
   // used only for its key over parse- and bind-affecting options (jsx,
   // moduleDetection, target, alwaysStrict...); files are parsed exactly as before.
-  // Each entry carries the ascending indexes of the groups predicted to use it
-  // and is dropped once none of them remains, so retention never outlives the
-  // last group that needs a file.
   private readonly registry = ts.createDocumentRegistry(ts.sys.useCaseSensitiveFileNames);
-  private readonly sourceFiles = new Map<
-    string,
-    { file: ts.SourceFile; uses: readonly number[]; bytes: number }
-  >();
-  // Upper bound on the source text retained between groups. The parsed and
-  // bound trees are roughly an order of magnitude larger than their text, so
-  // this caps cross-group retention at a few hundred megabytes; beyond it the
-  // entries needed furthest in the future are re-parsed instead of kept.
-  private retainedTextLimit = 32 * 1024 * 1024;
+  private readonly sourceFiles = new Map<string, { file: ts.SourceFile; shared: boolean }>();
   constructor(
     private readonly context: ProjectContext,
     files: IndexedFile[],
@@ -383,15 +372,12 @@ export class CompilerWorkspace {
     groups: Map<string, string[]>,
     observe?: (durationMs: number, files: number) => void,
   ) {
-    const order = [...groups];
-    const keys = order.map(([config]) =>
-      this.registry.getKeyForCompilationSettings(this.options(config)),
-    );
-    // A single group has nothing to share, so it skips the planning pass.
-    const uses = order.length > 1 ? this.plan(order, keys) : new Map<string, number[]>();
-    for (const [index, [config, roots]] of order.entries()) {
+    let remaining = groups.size;
+    for (const [config, roots] of groups) {
       const options = this.options(config);
-      const settings = keys[index];
+      const settings = this.registry.getKeyForCompilationSettings(options);
+      const rootSet = new Set(roots);
+      const acquired = new Set<string>();
       const host: ts.CompilerHost = {
         getSourceFile: (path, version) => {
           if (isLibFile(resolve(path)))
@@ -409,13 +395,11 @@ export class CompilerWorkspace {
           const key = `${settings}|${format ?? ""}|${actual}`;
           let entry = this.sourceFiles.get(key);
           if (!entry) {
-            entry = {
-              file: ts.createSourceFile(actual, content, version, true),
-              uses: uses.get(`${settings}|${actual}`) ?? [],
-              bytes: content.length,
-            };
+            entry = { file: ts.createSourceFile(actual, content, version, true), shared: false };
             this.sourceFiles.set(key, entry);
           }
+          if (!rootSet.has(actual)) entry.shared = true;
+          acquired.add(key);
           return entry.file;
         },
         getDefaultLibFileName: (o) => resolve(libDirectory, ts.getDefaultLibFileName(o)),
@@ -495,120 +479,13 @@ export class CompilerWorkspace {
       // The caller has finished this group before the generator resumes.
       // Release its compiler graph before constructing the next one.
       program = undefined;
-      this.release(index);
+      // Keep only files another group has imported; a file used solely as a
+      // root of this group is dropped so peak memory stays near one program.
+      if (--remaining === 0) this.sourceFiles.clear();
+      else
+        for (const key of acquired)
+          if (!this.sourceFiles.get(key)?.shared) this.sourceFiles.delete(key);
       if (process.versions.bun) Bun.gc(true);
     }
-  }
-  /** Drops every cached file that no later group is predicted to use, then
-   * evicts the files needed furthest in the future until the retained text
-   * fits the limit. A wrong prediction only costs a re-parse. */
-  private release(finished: number) {
-    const kept: { key: string; next: number; bytes: number }[] = [];
-    let bytes = 0;
-    for (const [key, entry] of this.sourceFiles) {
-      const next = entry.uses.find((use) => use > finished);
-      if (next === undefined) this.sourceFiles.delete(key);
-      else {
-        kept.push({ key, next, bytes: entry.bytes });
-        bytes += entry.bytes;
-      }
-    }
-    if (bytes <= this.retainedTextLimit) return;
-    kept.sort((a, b) => b.next - a.next);
-    for (const entry of kept) {
-      if (bytes <= this.retainedTextLimit) break;
-      this.sourceFiles.delete(entry.key);
-      bytes -= entry.bytes;
-    }
-  }
-  /** Predicts which indexed files each group's program will contain: a
-   * scanner-only import pre-pass (ts.preProcessFile) resolved with the same
-   * owner-specific options the compiler host uses. Returns, per
-   * `${settings}|${file}`, the ascending indexes of the groups that reach it. */
-  private plan(order: [string, string[]][], keys: string[]) {
-    const host: ts.ModuleResolutionHost = {
-      fileExists: (p) => this.read(p) !== undefined,
-      readFile: this.read,
-      directoryExists: this.directoryExists,
-      realpath: this.sourcePath,
-      getCurrentDirectory: () => this.context.canonicalRoot,
-      getDirectories: (p) => [...this.directories].filter((d) => dirname(d) === resolve(p)),
-      useCaseSensitiveFileNames: ts.sys.useCaseSensitiveFileNames,
-    };
-    const resolvers = new Map<
-      string,
-      { options: ts.CompilerOptions; cache: ts.ModuleResolutionCache }
-    >();
-    const resolver = (owner: string) => {
-      let entry = resolvers.get(owner);
-      if (!entry) {
-        const options = this.options(owner);
-        entry = {
-          options,
-          cache: ts.createModuleResolutionCache(
-            this.context.canonicalRoot,
-            this.sourcePath,
-            options,
-          ),
-        };
-        resolvers.set(owner, entry);
-      }
-      return entry;
-    };
-    // Imports resolve with the containing file's own tsconfig, so a file's
-    // dependencies are shared by every group except for unowned files.
-    const dependencies = new Map<string, string[]>();
-    const dependenciesOf = (file: string, config: string) => {
-      const owner = this.owner.get(file) ?? config;
-      const memo = `${owner}\0${file}`;
-      let found = dependencies.get(memo);
-      if (found) return found;
-      found = [];
-      const text = this.texts.get(file);
-      if (text !== undefined) {
-        const { options, cache } = resolver(owner);
-        const info = ts.preProcessFile(text, true, true);
-        const mode = ts.getImpliedNodeFormatForFile(
-          file,
-          cache.getPackageJsonInfoCache(),
-          host,
-          options,
-        );
-        for (const imported of info.importedFiles) {
-          const resolved = ts.resolveModuleName(
-            imported.fileName,
-            file,
-            options,
-            host,
-            cache,
-            undefined,
-            mode,
-          ).resolvedModule;
-          if (resolved) found.push(this.sourcePath(resolved.resolvedFileName));
-        }
-        for (const reference of info.referencedFiles)
-          found.push(this.sourcePath(resolve(dirname(file), reference.fileName)));
-      }
-      dependencies.set(memo, found);
-      return found;
-    };
-    const uses = new Map<string, number[]>();
-    for (const [index, [config, roots]] of order.entries()) {
-      const reached = new Set(roots);
-      const pending = [...roots];
-      for (let file = pending.pop(); file !== undefined; file = pending.pop())
-        for (const dependency of dependenciesOf(file, config))
-          if (this.inputs.has(dependency) && !reached.has(dependency)) {
-            reached.add(dependency);
-            pending.push(dependency);
-          }
-      for (const file of reached) {
-        const key = `${keys[index]}|${file}`;
-        const list = uses.get(key);
-        if (list) list.push(index);
-        else uses.set(key, [index]);
-      }
-    }
-    return uses;
   }
 }

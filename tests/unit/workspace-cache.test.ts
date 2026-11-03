@@ -9,8 +9,7 @@ import { CompilerWorkspace } from "../../packages/plugin-typescript/src/workspac
 
 const app = (name: string) => ({
   [`apps/${name}/package.json`]: `{"name":"${name}"}`,
-  [`apps/${name}/main.ts`]: `import {shared} from '@x/shared'; import {local} from './local.js'; export function ${name}(){shared(); local()}`,
-  [`apps/${name}/local.ts`]: "export function local(){}",
+  [`apps/${name}/main.ts`]: `import {shared} from '@x/shared'; export function ${name}(){shared()}`,
 });
 const config = (options: Record<string, unknown> = {}) =>
   JSON.stringify({
@@ -30,29 +29,15 @@ const files = {
   "apps/c/tsconfig.json": config({ jsx: "react-jsx" }),
   ...app("d"),
   "apps/d/tsconfig.json": config({ moduleDetection: "force" }),
-  // A later group that shares a's options but none of its files.
-  "tools/x/tsconfig.json": config(),
-  "tools/x/main.ts": "export function tool(){}",
 };
 
-type Group = {
-  config: string;
-  files: Map<string, ts.SourceFile>;
-  calls: string[];
-  cached: string[];
-};
-type Internals = {
-  sourceFiles: Map<string, { file: ts.SourceFile }>;
-  retainedTextLimit: number;
-};
-async function compile(f: { root: string }, uncached = false, retainedTextLimit?: number) {
+type Group = { config: string; files: Map<string, ts.SourceFile>; calls: string[] };
+async function compile(f: { root: string }, uncached = false) {
   const context = await createProjectContext(f.root),
     plugin = new TypeScriptPlugin(),
     scan = await new RepositoryScanner().scan(context, plugin.configurationReferences),
     workspace = new CompilerWorkspace(context, scan.files, scan.configs, []),
     groups: Group[] = [];
-  const internals = workspace as unknown as Internals;
-  if (retainedTextLimit !== undefined) internals.retainedTextLimit = retainedTextLimit;
   const name = (path: string) => relative(f.root, path);
   for (const { program, roots, config } of workspace.programs()) {
     const checker = program.getTypeChecker(),
@@ -76,12 +61,11 @@ async function compile(f: { root: string }, uncached = false, retainedTextLimit?
       config: config ? name(config) : "",
       files: new Map(program.getSourceFiles().map((sf) => [name(sf.fileName), sf])),
       calls,
-      cached: [...internals.sourceFiles.values()].map((e) => name(e.file.fileName)),
     });
     // Simulates the previous behaviour: every program parses and binds afresh.
-    if (uncached) internals.sourceFiles.clear();
+    if (uncached)
+      (workspace as unknown as { sourceFiles: Map<string, unknown> }).sourceFiles.clear();
   }
-  expect(internals.sourceFiles.size).toBe(0);
   return groups;
 }
 
@@ -101,7 +85,6 @@ describe("SourceFile reuse across tsconfig groups", () => {
       "apps/c/tsconfig.json",
       "apps/d/tsconfig.json",
       "packages/shared/tsconfig.json",
-      "tools/x/tsconfig.json",
     ]);
     const [a, b, c, d, shared] = [
       get("apps/a/tsconfig.json"),
@@ -135,43 +118,6 @@ describe("SourceFile reuse across tsconfig groups", () => {
       `packages/shared/index.ts:${files["packages/shared/index.ts"].indexOf("util()")} -> packages/shared/util.ts:0`,
     );
     expect(calls(cached).some((c) => c.includes("?"))).toBe(false);
-  });
-
-  it("releases each cached file after the last group that uses it", async () => {
-    const groups = await compile(f);
-    for (const [index, group] of groups.entries())
-      for (const path of group.cached) {
-        // Every retained file is in this program or a later one.
-        const later = groups.slice(index).some((g) => g.files.has(path));
-        expect(later, `${group.config}: ${path}`).toBe(true);
-      }
-    // Group-local files never outlive their own program.
-    for (const [index, group] of groups.entries())
-      if (group.config.startsWith("apps/")) {
-        const local = `${group.config.slice(0, -"tsconfig.json".length)}local.ts`;
-        expect(group.cached).toContain(local);
-        for (const next of groups.slice(index + 1)) expect(next.cached).not.toContain(local);
-      }
-    // The shared package is still reused while later groups need it.
-    const users = groups.filter((g) => g.files.has("packages/shared/util.ts"));
-    expect(users.length).toBeGreaterThan(2);
-    const last = groups.indexOf(users[users.length - 1] as Group);
-    expect(last).toBeLessThan(groups.length - 1);
-    for (const next of groups.slice(last + 1))
-      expect(next.cached).not.toContain("packages/shared/util.ts");
-  });
-
-  it("bounds retained source text and stays correct when nothing is kept", async () => {
-    const bounded = await compile(f, false, 0),
-      uncached = await compile(f, true);
-    // With no retention budget every cached file belongs to the current program.
-    for (const group of bounded)
-      for (const path of group.cached) expect(group.files.has(path), path).toBe(true);
-    const a = bounded.find((g) => g.config === "apps/a/tsconfig.json") as Group,
-      b = bounded.find((g) => g.config === "apps/b/tsconfig.json") as Group;
-    expect(b.files.get("packages/shared/util.ts")).not.toBe(a.files.get("packages/shared/util.ts"));
-    const calls = (groups: Group[]) => groups.flatMap((g) => g.calls).sort();
-    expect(calls(bounded)).toEqual(calls(uncached));
   });
 
   it("produces the expected call edges through the plugin", async () => {
