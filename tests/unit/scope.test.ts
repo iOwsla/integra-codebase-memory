@@ -42,7 +42,7 @@ it("does not scan symlinks, ignored files, nested repositories, secrets or own s
 it("records oversized and binary files without hashing them; excludes generated on request", async () => {
   const f = await fixture({
     "large.ts": "x".repeat(3000),
-    "binary.ts": "\0hello",
+    "binary.ts": `${"\0".repeat(64)}\x01\x02hello`,
     "generated.ts": "// @generated\nexport const g=1",
     ".codememory/config.json": JSON.stringify({ maxFileSizeBytes: 1024, excludeGenerated: true }),
   });

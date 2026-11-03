@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Raise the default `parserOutputLimitMiB` from 1024 to 4096. Configs written by `init` earlier keep an explicit `1024`; raise or remove it to use the new default.
+- Report a `.codememory/config.json` that is not valid JSON as `CONFIGURATION_ERROR` instead of `INTERNAL_ERROR`, and accept a leading UTF-8 BOM.
+- Keep scanning when a directory or config file disappears mid-scan (counted as `CONFIG_VANISHED`) or `.gitignore` is symlinked outside the root (`IGNORE_FILE_OUT_OF_SCOPE`). An unreadable directory now fails with `SCAN_UNREADABLE_DIRECTORY` naming its relative path.
+- Index source files that contain a literal NUL byte instead of skipping them as binary; the NUL is stored as a space. Files with a UTF-16 BOM, mostly-NUL content or invalid UTF-8 with NULs are still skipped.
+- Skip the repeated nested-repository ancestor check for files the scanner already vetted while walking, reducing per-file filesystem calls.
+
 ## 0.1.0-alpha.34 — 2026-11-03
 
 - Load TypeScript standard-library declarations (`lib.d.ts` and `lib.*.d.ts`) from CodeMemory's own TypeScript package during analysis. Member calls through `Record`, `Promise` and other built-in generics now resolve instead of being recorded as unresolved; library declarations are never indexed. The analyzer version changes, so existing indexes re-analyze once.

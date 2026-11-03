@@ -1,16 +1,41 @@
+import type { Dirent } from "node:fs";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { extname, relative, resolve } from "node:path";
-import type {
-  ConfigurationReferences,
-  ExclusionSummary,
-  FileScanner,
-  IndexedFile,
-  ProjectContext,
+import {
+  CodeMemoryError,
+  type ConfigurationReferences,
+  type ExclusionSummary,
+  type FileScanner,
+  type IndexedFile,
+  type ProjectContext,
 } from "@codememory/core";
 import { forbidden, hash, id, safePath, slash } from "@codememory/shared";
 import ignore, { type Ignore } from "ignore";
 import picomatch from "picomatch";
 export type ScanObserver = (event: "scan" | "hash" | "read", path: string) => void;
+const errorCode = (error: unknown) =>
+  error && typeof error === "object" && "code" in error ? String(error.code) : "";
+/** A file that disappeared between listing and reading (installs, branch switches). */
+const vanished = (error: unknown) => ["NOT_FOUND", "ENOENT"].includes(errorCode(error));
+/**
+ * Source files may legitimately contain a NUL inside a string literal. Treat a file as
+ * binary only when it carries a UTF-16 BOM, when NULs exceed 10% of the first 8 KiB, or
+ * when it contains a NUL and is not valid UTF-8.
+ */
+function isBinary(data: Buffer) {
+  if ((data[0] === 0xff && data[1] === 0xfe) || (data[0] === 0xfe && data[1] === 0xff)) return true;
+  if (!data.includes(0)) return false;
+  const sample = data.subarray(0, 8192);
+  let nul = 0;
+  for (const byte of sample) if (byte === 0) nul++;
+  if (nul > sample.length * 0.1) return true;
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(data);
+    return false;
+  } catch {
+    return true;
+  }
+}
 export class RepositoryScanner implements FileScanner {
   constructor(private readonly observe: ScanObserver = () => {}) {}
   async discover(context: ProjectContext, visit: (path: string) => Promise<void>) {
@@ -49,7 +74,7 @@ export class RepositoryScanner implements FileScanner {
       ]) {
         const ignorePath = resolve(dir, ignoreName);
         try {
-          const p = await safePath(context, ignorePath);
+          const p = await safePath(context, ignorePath, { ancestorsVetted: true });
           const s = await lstat(p);
           if (s.size <= 65536) {
             const text = await readFile(p, "utf8");
@@ -61,10 +86,30 @@ export class RepositoryScanner implements FileScanner {
             });
           }
         } catch (e) {
-          if ((e as { code?: string }).code !== "NOT_FOUND") throw e;
+          if (vanished(e)) continue;
+          // A symlink to a file outside the root is never read; report the gap. Other
+          // errors (EACCES, EIO) stay fatal so ignored secrets are not indexed.
+          if (errorCode(e) !== "PATH_OUT_OF_SCOPE") throw e;
+          exclude("files", "IGNORE_FILE_OUT_OF_SCOPE");
         }
       }
-      for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a, b) =>
+      let entries: Dirent[];
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch (error) {
+        if (dir === context.canonicalRoot) throw error;
+        const code = errorCode(error);
+        // Removed between the parent listing and this recursion: nothing to index.
+        if (code === "ENOENT" || code === "ENOTDIR") return;
+        // Fail the run rather than publishing every file below this directory as deleted.
+        if (["EACCES", "EPERM", "EIO"].includes(code))
+          throw new CodeMemoryError(
+            "SCAN_UNREADABLE_DIRECTORY",
+            `Cannot read directory ${slash(relative(context.canonicalRoot, dir))} (${code})`,
+          );
+        throw error;
+      }
+      for (const entry of entries.sort((a, b) =>
         a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
       )) {
         const path = resolve(dir, entry.name),
@@ -113,13 +158,21 @@ export class RepositoryScanner implements FileScanner {
           continue;
         }
         if (config) {
-          const actual = await safePath(context, path),
-            info = await lstat(actual);
-          if (info.size <= 65536) configs.set(rel, await readFile(actual, "utf8"));
+          try {
+            const actual = await safePath(context, path, { ancestorsVetted: true }),
+              info = await lstat(actual);
+            if (info.size <= 65536) {
+              this.observe("read", actual);
+              configs.set(rel, await readFile(actual, "utf8"));
+            }
+          } catch (error) {
+            if (!vanished(error)) throw error;
+            exclude("files", "CONFIG_VANISHED");
+          }
           continue;
         }
         try {
-          const actual = await safePath(context, path),
+          const actual = await safePath(context, path, { ancestorsVetted: true }),
             info = await lstat(actual);
           let status: IndexedFile["status"] = "INDEXED",
             content = "",
@@ -129,10 +182,11 @@ export class RepositoryScanner implements FileScanner {
           } else {
             this.observe("read", actual);
             const data = await readFile(actual);
-            if (data.includes(0)) {
+            if (isBinary(data)) {
               status = "SKIPPED_BINARY";
             } else {
-              content = data.toString("utf8");
+              // PostgreSQL text/jsonb rejects U+0000; a space keeps every offset valid.
+              content = data.toString("utf8").replaceAll("\0", " ");
               this.observe("hash", actual);
               contentHash = hash(data);
             }
@@ -158,8 +212,7 @@ export class RepositoryScanner implements FileScanner {
             parserVersion: context.indexVersion,
           });
         } catch (error) {
-          const code =
-            error && typeof error === "object" && "code" in error ? String(error.code) : "";
+          const code = errorCode(error);
           if (!["EACCES", "EPERM", "ENOENT", "NOT_FOUND", "EIO", "EBUSY"].includes(code))
             throw error;
           files.push({
@@ -194,11 +247,17 @@ export class RepositoryScanner implements FileScanner {
         const next = jsonCandidates.get(resolve(candidate));
         if (!next || visited.has(next)) continue;
         if (!configs.has(next)) {
-          const actual = await safePath(context, next);
-          const info = await lstat(actual);
-          if (info.size > 65536) continue;
-          this.observe("read", actual);
-          configs.set(next, await readFile(actual, "utf8"));
+          try {
+            const actual = await safePath(context, next);
+            const info = await lstat(actual);
+            if (info.size > 65536) continue;
+            this.observe("read", actual);
+            configs.set(next, await readFile(actual, "utf8"));
+          } catch (error) {
+            if (!vanished(error)) throw error;
+            exclude("files", "CONFIG_VANISHED");
+            continue;
+          }
         }
         queue.push(next);
       }

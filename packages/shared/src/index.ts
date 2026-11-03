@@ -25,7 +25,7 @@ export const configSchema = z
       .max(16 * 1024 * 1024)
       .default(2097152),
     parserTimeoutMs: z.number().int().min(1000).max(600000).default(120000),
-    parserOutputLimitMiB: z.number().int().min(1).max(8192).default(1024),
+    parserOutputLimitMiB: z.number().int().min(1).max(8192).default(4096),
     include: z.array(z.string().max(500)).max(100).default([]),
     exclude: z.array(z.string().max(500)).max(100).default([]),
     excludeGenerated: z.boolean().default(false),
@@ -50,7 +50,16 @@ export function forbidden(path: string): boolean {
         /^(credentials|secrets)(\.|$)/i.test(p),
     );
 }
-export async function safePath(context: ProjectContext, path: string): Promise<string> {
+/**
+ * Resolve a project path and reject it if it escapes the root, is protected or sits in
+ * a nested repository. `ancestorsVetted` skips only the ancestor `.git` walk for callers
+ * (the scanner) that already checked every directory on the way down.
+ */
+export async function safePath(
+  context: ProjectContext,
+  path: string,
+  options: { ancestorsVetted?: boolean } = {},
+): Promise<string> {
   const candidate = resolve(context.canonicalRoot, path);
   if (
     !contains(context.canonicalRoot, candidate) ||
@@ -65,6 +74,7 @@ export async function safePath(context: ProjectContext, path: string): Promise<s
     forbidden(relative(context.canonicalRoot, actual))
   )
     throw new CodeMemoryError("PATH_OUT_OF_SCOPE", "Path is outside the permitted source scope");
+  if (options.ancestorsVetted) return actual;
   let dir = resolve(actual, "..");
   while (contains(context.canonicalRoot, dir) && dir !== context.canonicalRoot) {
     if (
@@ -102,7 +112,13 @@ export async function createProjectContext(root?: string): Promise<ProjectContex
       throw new CodeMemoryError("PATH_OUT_OF_SCOPE", "Configuration escapes project");
     if ((await stat(actual)).size > 65536)
       throw new CodeMemoryError("CONFIGURATION_ERROR", "Config exceeds 64 KiB");
-    raw = JSON.parse(await readFile(actual, "utf8"));
+    const text = (await readFile(actual, "utf8")).replace(/^\uFEFF/, "");
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      // Fixed message: SyntaxError text can echo config content.
+      throw new CodeMemoryError("CONFIGURATION_ERROR", ".codememory/config.json is not valid JSON");
+    }
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
   }
