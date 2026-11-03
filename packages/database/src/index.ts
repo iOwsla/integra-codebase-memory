@@ -225,6 +225,7 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
     run: IndexResult,
   ) {
     if (!this.connection) throw new Error("Publication requires project lock");
+    let refreshStatistics = false;
     await this.query("BEGIN");
     try {
       const scope = c.projectScopeId;
@@ -271,6 +272,9 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
         .map((file) => file.id);
       const allAffected = [...affected, ...deletedIds];
       const replaceAll = !s.version || affected.size > s.files.length * 0.7;
+      // Bulk rewrites leave planner statistics stale until autovacuum catches up;
+      // symbol search and status reads then pick seconds-long plans.
+      refreshStatistics = replaceAll || allAffected.length > s.files.length * 0.2;
       await timed("remove_edges", allAffected.length, () =>
         this.query(
           replaceAll
@@ -369,6 +373,17 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
     } catch (e) {
       await this.query("ROLLBACK");
       throw e;
+    }
+    if (!refreshStatistics) return;
+    const started = performance.now();
+    try {
+      await this.query("ANALYZE files, symbols, symbol_edges, unresolved_references");
+      log("info", "index_statistics_refreshed", {
+        durationMs: Math.round(performance.now() - started),
+      });
+    } catch {
+      // The generation is already published; stale statistics only cost query time.
+      log("warn", "index_statistics_refresh_failed", {});
     }
   }
   async recordFailure(c: ProjectContext, message: string) {

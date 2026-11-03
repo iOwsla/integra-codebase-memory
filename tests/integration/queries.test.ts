@@ -317,6 +317,15 @@ it("lists interface and base-class dispatch callers with their supertype member"
   try {
     await db.store.register(c);
     await new IndexService(c, db.store, new RepositoryScanner(), new TypeScriptPlugin()).index();
+    // An initial publication refreshes planner statistics for the relationship tables.
+    const { default: pg } = await import("pg");
+    const stats = new pg.Client({ connectionString: db.url });
+    await stats.connect();
+    const analyzed = await stats.query(
+      "SELECT relname FROM pg_stat_user_tables WHERE relname IN ('symbols','symbol_edges') AND last_analyze IS NOT NULL",
+    );
+    await stats.end();
+    expect(analyzed.rows.map((r) => r.relname).sort()).toEqual(["symbol_edges", "symbols"]);
     const service = new CodebaseService(c, db.store);
     const callers = async (name: string) =>
       (
