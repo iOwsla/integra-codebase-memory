@@ -323,9 +323,52 @@ export async function runBackgroundWork(
 export async function runMcp(session: ProjectSession, store: ProjectStore) {
   return runMcpWorkspace([{ session, store }]);
 }
+/**
+ * Cancels every session at once and waits for in-flight work, session close, the transport and
+ * the stores under one deadline. Returns false when the deadline expired: stores whose session is
+ * still running (pool.end() waits for the locked publish connection) are closed without waiting.
+ */
+export async function closeWorkspace(
+  entries: { session: Pick<ProjectSession, "close">; store: Pick<ProjectStore, "close"> }[],
+  pending: Promise<unknown>[],
+  closeTransport: () => Promise<void>,
+  deadlineMs = SESSION_CLOSE_DEADLINE_MS,
+): Promise<boolean> {
+  // Session close aborts the index; start it before waiting for attach or background work.
+  const sessionsClosed = Promise.all(entries.map((e) => e.session.close()));
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  const closed = await Promise.race([
+    Promise.all([...pending, sessionsClosed]).then(() => true),
+    new Promise<false>((resolve) => {
+      deadline = setTimeout(() => resolve(false), deadlineMs);
+      deadline.unref();
+    }),
+  ]);
+  clearTimeout(deadline);
+  if (closed) {
+    await closeTransport();
+    await Promise.all(entries.map((e) => e.store.close()));
+    return true;
+  }
+  log("warn", "session_close_timeout", { timeoutMs: deadlineMs });
+  sessionsClosed.catch(() => {});
+  await closeTransport();
+  for (const e of entries)
+    void e.store.close().catch((error) => {
+      log("warn", "store_close_failed", { error: publicError(error) });
+    });
+  return false;
+}
 export async function runMcpWorkspace(
   entries: { session: ProjectSession; store: ProjectStore }[],
   openProject?: (root: string) => Promise<{ session: ProjectSession; store: ProjectStore }>,
+  options: {
+    /** Bound for the whole shutdown; afterwards the process is ended through onForcedExit. */
+    shutdownDeadlineMs?: number;
+    /** Called after a shutdown timeout. PostgreSQL rolls back an open publish and frees the
+     * advisory lock when the connection drops. Defaults to process.exit. */
+    onForcedExit?: (code: number) => void;
+  } = {},
 ) {
   const services = entries.map(
     ({ session, store }) => new CodebaseService(session.context, store, session),
@@ -384,24 +427,20 @@ export async function runMcpWorkspace(
     clearInterval(workerTimer);
     workerAbort.abort();
     closing ??= (async () => {
-      await pending;
-      await workerPending;
-      // Sessions cancel their index on close; never let a stuck one block shutdown.
-      let deadline: ReturnType<typeof setTimeout> | undefined;
-      const closed = await Promise.race([
-        Promise.all(entries.map((e) => e.session.close())).then(() => true),
-        new Promise<false>((resolve) => {
-          deadline = setTimeout(() => resolve(false), SESSION_CLOSE_DEADLINE_MS);
-          deadline.unref();
-        }),
-      ]);
-      clearTimeout(deadline);
-      if (!closed) log("warn", "session_close_timeout", { timeoutMs: SESSION_CLOSE_DEADLINE_MS });
-      await handle.close();
-      await Promise.all(entries.map((e) => e.store.close()));
+      const closed = await closeWorkspace(
+        entries,
+        [pending, workerPending],
+        () => handle.close(),
+        options.shutdownDeadlineMs,
+      );
       process.stdin.pause();
       process.removeListener("SIGINT", onSignal);
       process.removeListener("SIGTERM", onSignal);
+      if (!closed) {
+        // A running publish or parser keeps the event loop alive; end the process explicitly.
+        process.exitCode = 1;
+        (options.onForcedExit ?? ((code: number) => process.exit(code)))(1);
+      }
     })();
     return closing;
   };

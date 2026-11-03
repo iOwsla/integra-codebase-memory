@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- MCP shutdown cancels the running index immediately instead of after pending background work, and bounds the whole teardown by one 10 s deadline. When a publish is still running at the deadline, the server logs `session_close_timeout` and exits with code 1 instead of waiting minutes for the database pool; PostgreSQL rolls back the open publish and releases the project lock.
 - Migration 11 drops the foreign keys and primary key of `symbol_edges`. Publication now deletes edges of removed symbols itself, matching the former cascade. On 300k real edges this raised edge insert throughput 2.3-2.5x and halved WAL volume.
 - Record the receiver's static class/interface on call edges (`receiverType`) and keep a `find_callers` dispatch row only when that type is an ancestor of the queried member. Calls on a sibling subclass that inherits the base member are no longer reported as possible callers of an override. The analyzer version changes, so existing indexes re-analyze once.
 - evaluate-project: exclude `this` keyword matches and inherited-member calls on sibling receivers from the language-service oracle.
