@@ -332,14 +332,26 @@ it("lists interface and base-class dispatch callers with their supertype member"
       ["Service.concrete", 8, null],
       ["Service.viaPromise", 9, "Handler.verify"],
     ]);
-    // Supertype members only report their own callers; static members never match instance ones.
+    // Supertype members only report their own callers.
     expect(await callers("Handler.verify")).toEqual([
       ["Service.direct", 6, null],
       ["Service.viaUnion", 7, null],
       ["Service.viaPromise", 9, null],
     ]);
+    // super.run() is a direct base call, never a dispatch caller of the override.
     expect(await callers("Sub.run")).toEqual([["Service.base", 11, "Base.run"]]);
+    expect(await callers("Base.run")).toEqual([
+      ["Sub.run", 9, null],
+      ["Service.base", 11, null],
+    ]);
+    // Static members and constructors keep only their direct callers.
     expect(await callers("Static.run")).toEqual([["Service.staticCall", 10, null]]);
+    expect(await callers("Sub.make")).toEqual([]);
+    expect(await callers("Derived.constructor")).toEqual([]);
+    expect(await callers("Built.constructor")).toEqual([
+      ["Derived.constructor", 12, null],
+      ["Service.build", 13, null],
+    ]);
     expect(await callers("CustomHandler.verify")).toHaveLength(3);
   } finally {
     await db.dispose();

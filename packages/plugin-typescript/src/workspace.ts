@@ -47,7 +47,7 @@ const defaults: ts.CompilerOptions = {
 const libDirectory = dirname(ts.getDefaultLibFilePath({}));
 const libFiles = new Map<string, ts.SourceFile | null>();
 const isLibFile = (path: string) =>
-  dirname(path) === libDirectory && /^lib\.[\w.]+\.d\.ts$/.test(basename(path));
+  dirname(path) === libDirectory && /^lib(\.[\w.]+)?\.d\.ts$/.test(basename(path));
 function libSourceFile(path: string, target: ts.ScriptTarget) {
   const key = `${target}:${path}`;
   let file = libFiles.get(key);
