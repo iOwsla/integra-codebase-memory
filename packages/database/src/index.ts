@@ -23,6 +23,14 @@ import { migrations } from "./schema";
 export const requiredSchemaVersion = migrations.length;
 export const defaultDatabaseUrl =
   "postgresql://codememory:local-development-only@127.0.0.1:55432/codememory";
+// Files of project $1 that are not INDEXED, as (path, status). The real file_status column
+// has planner statistics and the files_not_indexed index; rows whose metadata is not yet
+// backfilled fall back to data through files_metadata_pending. Filtering on
+// data->>'status' alone made the planner detoast every file's content on each query.
+const notIndexedFiles = `(SELECT path, file_status AS status FROM files
+          WHERE repository_id=$1 AND file_status<>'INDEXED'
+        UNION ALL SELECT path, data->>'status' FROM files
+          WHERE repository_id=$1 AND file_status IS NULL AND data->>'status'<>'INDEXED')`;
 // True while the backend recorded in index_jobs still holds the project's session advisory
 // lock (pg_try_advisory_lock(bigint) splits the key into classid/objid with objsubid=1).
 const indexLockActive = (pid: string, scope: string) =>
@@ -385,7 +393,7 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
           COALESCE((SELECT CASE WHEN j.data->>'state'='RUNNING' THEN ${indexLockActive("j.backend_pid", "$1")} ELSE false END
             FROM index_jobs j WHERE j.repository_id=$1),false) AS stale,
           (SELECT data->>'startedAt' FROM index_jobs WHERE repository_id=$1) AS stale_since,
-          (EXISTS(SELECT 1 FROM files WHERE repository_id=$1 AND data->>'status'<>'INDEXED')
+          (EXISTS(SELECT 1 FROM ${notIndexedFiles} n)
            OR COALESCE((SELECT jsonb_array_length(data->'diagnostics')>0 FROM index_runs WHERE repository_id=$1 ORDER BY id DESC LIMIT 1),false)) AS incomplete
         FROM repositories WHERE id=$1`,
             [c.projectScopeId],
@@ -702,7 +710,7 @@ export class PostgresStore extends MemoryWorkflowRepository implements ProjectSt
       `WITH last AS (SELECT data FROM index_runs WHERE repository_id=$1 ORDER BY id DESC LIMIT 1),
       diagnostics AS (SELECT value,ordinality FROM last,jsonb_array_elements(COALESCE(data->'diagnostics','[]'::jsonb)) WITH ORDINALITY),
       page AS (SELECT value,ordinality FROM diagnostics ORDER BY ordinality LIMIT $2 OFFSET $3),
-      gaps AS (SELECT data->>'status' AS reason,count(*)::int AS files,(array_agg(path ORDER BY path))[1:20] AS "sampleFiles",count(*)>20 AS "hasMoreFiles" FROM files WHERE repository_id=$1 AND data->>'status'<>'INDEXED' GROUP BY data->>'status'),
+      gaps AS (SELECT status AS reason,count(*)::int AS files,(array_agg(path ORDER BY path))[1:20] AS "sampleFiles",count(*)>20 AS "hasMoreFiles" FROM ${notIndexedFiles} n GROUP BY status),
       reasons AS (SELECT COALESCE(value->>'kind','DIAGNOSTIC') AS reason,count(*)::int AS messages,count(DISTINCT value->>'file')::int AS files,(array_agg(DISTINCT value->>'file' ORDER BY value->>'file'))[1:20] AS "sampleFiles",count(DISTINCT value->>'file')>20 AS "hasMoreFiles" FROM diagnostics GROUP BY COALESCE(value->>'kind','DIAGNOSTIC'))
       SELECT version,fingerprint,indexed_at,
       (version=0 OR EXISTS(SELECT 1 FROM gaps) OR EXISTS(SELECT 1 FROM diagnostics)) AS incomplete,

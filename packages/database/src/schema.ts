@@ -166,4 +166,8 @@ BEGIN
 END $$;
 CREATE TRIGGER files_metadata_from_data BEFORE INSERT OR UPDATE OF data ON files
   FOR EACH ROW EXECUTE FUNCTION files_metadata_from_data();`,
+  // Every query checks for non-INDEXED files. With no statistics on data->>'status' the
+  // planner skipped files_incomplete and detoasted every file's content (55 ms per call on
+  // a 5,660-file project). The real column has statistics, so this partial index is used.
+  `CREATE INDEX files_not_indexed ON files(repository_id) WHERE file_status<>'INDEXED';`,
 ];

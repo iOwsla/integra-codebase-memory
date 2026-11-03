@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Migration 13 indexes non-INDEXED files by the `file_status` column. The incomplete-coverage check that runs before every query no longer detoasts every file's content: per-call overhead on a 5,660-file project fell from about 59 ms to 1 ms.
 - Indexing an unmigrated database now fails with `SCHEMA_OUTDATED` ("Run codememory system setup to migrate") instead of a raw "column does not exist" error. That error and database connection failures retry once per `reconcileMs` instead of backing off exponentially, so open sessions recover soon after setup.
 - Migration 12 adds a trigger that derives the `files` metadata columns from the stored JSON on every write, so an older release (or manual SQL) that writes only the JSON can no longer leave stale hashes that hide changes or keep an outdated graph. Rows that already drifted are queued for the backfill once, and publication also rewrites a row whose columns disagree with its JSON.
 - The post-publish `ANALYZE` runs only for tables whose written and deleted rows exceed 10,000 and 10% of the table's estimated size (or that were never analyzed), and logs them as `tables`. A one-file edit in a small project no longer analyzes the shared tables of every project.
