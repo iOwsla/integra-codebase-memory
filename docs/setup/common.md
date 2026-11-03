@@ -61,7 +61,7 @@ The [AGENTS.md template](../instructions/AGENTS.md) and
 [CLAUDE.md template](../instructions/CLAUDE.md) contain the same self-contained
 instruction block. If the target file does not exist, save the appropriate
 template under that name at the project root. If it already exists, merge the
-`integra-code-memory:start/end` block without overwriting project rules. When
+`integra-code-memory:start/end` block at the top of the file without overwriting project rules. When
 updating, replace only the matching marked block rather than adding another copy.
 
 Older `codebase-memory-mcp` instructions belong to a different server. If you use

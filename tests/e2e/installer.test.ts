@@ -71,6 +71,11 @@ it("merges both clients, preserves other settings and instructions, and is idemp
       expect(rules).toContain("Only after explicit approval");
     }
     expect(claudeRules).toContain("Keep these too.");
+    expect(claudeRules).toMatch(/^<!-- integra-code-memory:start -->\n# Integra CodeMemory\n/);
+    expect(claudeRules).toContain("+integra_code_memory");
+    expect(claudeRules).toMatch(
+      /<!-- integra-code-memory:end -->\n\n# Claude rules\nKeep these too\.\n$/,
+    );
     expect(claudeRules).not.toContain("@AGENTS.md");
     const paths = JSON.parse(first.stdout).changedFiles as string[];
     const before = await Promise.all(paths.map((p) => readFile(resolve(f.root, p), "utf8")));
@@ -170,10 +175,12 @@ it("refreshes full instructions in both files while preserving user-owned import
     await run(f.root, "both");
     const text = await readFile(resolve(f.root, "AGENTS.md"), "utf8");
     expect(text).not.toContain("old rules");
-    expect(text).toMatch(/^before\n/);
-    expect(text).toMatch(/\nafter\n$/);
+    expect(text).toMatch(/^<!-- integra-code-memory:start -->\n/);
+    expect(text).toMatch(/<!-- integra-code-memory:end -->\n\nbefore\nafter\n$/);
     const claude = await readFile(resolve(f.root, "CLAUDE.md"), "utf8");
-    expect(claude).toMatch(/^@AGENTS.md\n\nKeep Claude rules.\n/);
+    expect(claude).toMatch(
+      /<!-- integra-code-memory:end -->\n\n@AGENTS.md\n\nKeep Claude rules.\n$/,
+    );
     expect(claude).toContain("attach_project");
     expect(claude).toContain("diagnosticLimit");
     expect(claude.split("<!-- integra-code-memory:start -->")).toHaveLength(2);
@@ -326,8 +333,9 @@ it("upgrades recognizable connections with backups while preserving unrelated se
     );
     expect(now.mcpServers.other).toEqual({ command: "keep-me" });
     const updatedRules = await readFile(resolve(f.root, "CLAUDE.md"), "utf8");
-    expect(updatedRules).toMatch(/^User prefix\n/);
-    expect(updatedRules).toMatch(/\nUser suffix\n$/);
+    // The managed block moves to the top; the user's lines keep their order below it.
+    expect(updatedRules).toMatch(/^<!-- integra-code-memory:start -->\n/);
+    expect(updatedRules).toMatch(/<!-- integra-code-memory:end -->\n\nUser prefix\nUser suffix\n$/);
     expect(updatedRules).not.toContain("@AGENTS.md");
     expect(updatedRules).toContain("attach_project");
     expect(updatedRules).toContain("diagnosticLimit");
